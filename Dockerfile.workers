@@ -1,0 +1,28 @@
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY src/ ./src/
+
+# Create non-root user
+RUN useradd -m -u 1000 workeruser && chown -R workeruser:workeruser /app
+USER workeruser
+
+# Create logs directory
+RUN mkdir -p /app/logs
+
+# Run RQ worker
+CMD ["python", "-m", "src.workers.continuous"]

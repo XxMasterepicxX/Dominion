@@ -1,0 +1,29 @@
+[Unit]
+Description=Dominion Real Estate Intelligence Scheduler
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=dominion
+Group=dominion
+WorkingDirectory=/opt/dominion
+Environment=PATH=/opt/dominion/venv/bin
+Environment=PYTHONPATH=/opt/dominion
+ExecStart=/opt/dominion/venv/bin/python run_scheduler.py --config-file /opt/dominion/.env.production
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/dominion/logs /opt/dominion/data
+
+[Install]
+WantedBy=multi-user.target

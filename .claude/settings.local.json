@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Read(//tmp/cama_data/**)",
+      "WebSearch",
+      "Bash(venv312/Scripts/python.exe test_all_methods.py:*)",
+      "Bash(grep:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
