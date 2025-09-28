@@ -1,13 +1,13 @@
 """
 Gainesville News Monitor (RSS + Web Scraping)
 
-Tracks local news mentions of real estate, development, and municipal decisions.
-No RSS feeds available per mmm.txt, uses HTML scraping with content extraction.
+Comprehensive local news collection for knowledge graph building.
+Collects ALL local news to find hidden patterns and relationships.
 
-Coverage: Development news, zoning changes, municipal decisions, business news
-Data Source: Gainesville Sun, local news websites
-Update Frequency: Daily
-Intelligence Value: Early warning system for development opportunities and risks
+Coverage: Local news, government, crime, weather, sports, business, education
+Data Sources: WUFT News, Alachua Chronicle, Mainstreet Daily, Gainesville Sun, The Alligator
+Update Frequency: Daily at 6:00 AM
+Intelligence Value: Complete local knowledge graph for pattern detection
 """
 import hashlib
 import json
@@ -715,3 +715,55 @@ async def create_news_scraper(
     )
     await scraper.initialize()
     return scraper
+
+
+# Pre-configured Gainesville news feeds
+DEFAULT_NEWS_FEEDS = [
+    RSSFeedConfig(
+        url="https://www.wuft.org/news/feed/",
+        source_name="WUFT News",
+        section="local_news",
+        update_frequency_hours=6,
+        max_articles_per_fetch=30,
+        content_selectors={"article": [".entry-content", ".post-content", "article"]},
+        remove_selectors=[".social-share", ".advertisement", ".newsletter-signup"]
+    ),
+    RSSFeedConfig(
+        url="https://alachuachronicle.com/feed/",
+        source_name="Alachua Chronicle",
+        section="county_news",
+        update_frequency_hours=12,
+        max_articles_per_fetch=25,
+        content_selectors={"article": [".entry-content", ".post-content", "article"]},
+        remove_selectors=[".social-share", ".advertisement", ".newsletter-signup"]
+    ),
+    RSSFeedConfig(
+        url="https://mainstreetdailynews.com/feed/",
+        source_name="Mainstreet Daily News",
+        section="local_news",
+        update_frequency_hours=8,
+        max_articles_per_fetch=20,
+        content_selectors={"article": [".entry-content", ".post-content", "article"]},
+        remove_selectors=[".social-share", ".advertisement", ".newsletter-signup"]
+    )
+]
+
+# HTML scraping sources (no RSS feeds)
+DEFAULT_HTML_SOURCES = [
+    {
+        "url": "https://www.gainesville.com/news/",
+        "source_name": "Gainesville Sun",
+        "section": "local_news",
+        "article_selectors": [".story-card a", ".headline a", "h3 a"],
+        "content_selectors": [".story-body", ".article-content", ".entry-content"],
+        "max_articles": 15
+    },
+    {
+        "url": "https://alligator.org/section/news/",
+        "source_name": "The Alligator",
+        "section": "university_news",
+        "article_selectors": [".story-headline a", ".article-title a", "h2 a"],
+        "content_selectors": [".story-content", ".article-content", ".entry-content"],
+        "max_articles": 10
+    }
+]

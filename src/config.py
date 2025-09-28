@@ -398,11 +398,11 @@ class DataSourceConfig:
             "schedule": "daily_11:00"
         },
         "city_council": {
-            "url": "https://www.gainesvillefl.gov/Government-Pages/Government/Public-Meeting-Participation/New-Agendas-Minutes",
-            "portal_type": "gainesville_gov",
-            "method": "web_scraping",
-            "schedule": "weekly_tuesday_08:00",
-            "comment": "Migrated from Legistar in 2020"
+            "url": "https://pub-cityofgainesville.escribemeetings.com",
+            "portal_type": "escribe",
+            "method": "ajax_api",
+            "schedule": "daily_08:00",
+            "comment": "eScribe AJAX endpoints - development boards monitoring"
         }
     }
 

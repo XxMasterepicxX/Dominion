@@ -1,13 +1,21 @@
 """
-Gainesville City Council Scraper (via Legistar API)
+Gainesville City Council & Development Boards Scraper (via eScribe AJAX)
 
-Tracks city council meetings, agendas, minutes, and voting records.
-Monitors municipal decisions affecting development and zoning.
+Tracks all city meetings affecting real estate development:
+- City Commission (final approvals)
+- Development Review Board (site plans)
+- Plan Board (comprehensive plan changes)
+- Historic Preservation Board (renovation impacts)
+- Housing Advisory Committee (affordable housing)
+- CRA Boards (redevelopment areas)
+- Board of Adjustment (variances)
+- Public Works & Utility Boards (infrastructure)
 
-Coverage: Council meetings, votes, zoning decisions, development approvals
-Data Source: Legistar meeting management system API
-Update Frequency: Weekly (after council meetings)
-Intelligence Value: Political decisions affecting real estate development
+Extracts development petitions (LD25-XXXXXX), rezoning requests, and assemblage signals.
+
+Data Source: eScribe AJAX endpoints (migrated from Legistar 2020)
+Update Frequency: Daily (8am to catch overnight agenda updates)
+Intelligence Value: Early development signals, political sentiment, assemblage patterns
 """
 import hashlib
 import json
@@ -44,7 +52,26 @@ class DocumentType(Enum):
     PUBLIC_HEARING = "public_hearing"
     BUDGET = "budget"
     ANNOUNCEMENT = "announcement"
+    DEVELOPMENT_APPLICATION = "development_application"
+    REZONING_REQUEST = "rezoning_request"
+    VARIANCE_APPLICATION = "variance_application"
     OTHER = "other"
+
+
+class MeetingType(Enum):
+    """Types of meetings that affect real estate development."""
+    CITY_COMMISSION = "City Commission"
+    DEVELOPMENT_REVIEW_BOARD = "Development Review Board"
+    PLAN_BOARD = "Plan Board"
+    HISTORIC_PRESERVATION = "Historic Preservation Board"
+    HOUSING_ADVISORY = "SHIP - Affordable Housing Advisory Committee"
+    CRA_DOWNTOWN = "CRA Advisory Board - Downtown"
+    CRA_EASTSIDE = "CRA Advisory Board - Eastside"
+    BOARD_OF_ADJUSTMENT = "Board of Adjustment"
+    TREE_ADVISORY = "Tree Advisory Board"
+    PUBLIC_WORKS = "Public Works Committee"
+    UTILITY_ADVISORY = "Utility Advisory Board"
+    OTHER = "Other"
 
 
 class MeetingStatus(Enum):
@@ -73,6 +100,20 @@ class CouncilMember(BaseModel):
     vote: Optional[str] = None  # For specific agenda items
 
 
+class DevelopmentPetition(BaseModel):
+    """Model for development petition extracted from agenda."""
+    petition_id: str = Field(..., regex=r'^LD\d{2}-\d{6}$')  # LD25-000094 format
+    petition_type: str  # Rezoning, Site Plan, Variance
+    property_address: Optional[str] = None
+    parcel_id: Optional[str] = None
+    applicant_name: Optional[str] = None
+    agent_attorney: Optional[str] = None
+    description: Optional[str] = None
+    current_zoning: Optional[str] = None
+    proposed_zoning: Optional[str] = None
+    development_details: Optional[str] = None
+
+
 class AgendaItem(BaseModel):
     """Model for individual agenda items."""
     item_number: str = Field(..., min_length=1)
@@ -87,17 +128,31 @@ class AgendaItem(BaseModel):
     attachments: Optional[List[str]] = None  # URLs to supporting documents
     public_comment: bool = False
 
+    # Development-specific fields
+    development_petition: Optional[DevelopmentPetition] = None
+    affects_real_estate: bool = False
+    assemblage_signal: bool = False
+
 
 class CouncilMeeting(BaseModel):
     """Model for city council meeting data."""
     meeting_id: str = Field(..., min_length=1)
     meeting_date: datetime
-    meeting_type: str = Field(default="Regular Meeting")
+    meeting_type: MeetingType = MeetingType.CITY_COMMISSION
+    board_name: str = Field(default="City Commission")
     status: MeetingStatus = MeetingStatus.SCHEDULED
     title: Optional[str] = None
     location: Optional[str] = None
     start_time: Optional[str] = None
     end_time: Optional[str] = None
+
+    # eScribe specific fields
+    escribe_meeting_id: Optional[str] = None
+    calendar_id: Optional[str] = None
+    is_cancelled: bool = False
+    cancellation_reason: Optional[str] = None
+    is_rescheduled: bool = False
+    original_date: Optional[datetime] = None
 
     # Documents
     agenda_url: Optional[str] = None
@@ -181,49 +236,35 @@ class CityCouncilScraper(ResilientScraper):
         # Create data directory
         self.data_directory.mkdir(parents=True, exist_ok=True)
 
-        # Portal-specific configurations
-        self.portal_configs = {
-            "legistar": {
-                "meeting_list_path": "/Calendar.aspx",
-                "agenda_selector": "a[href*='AgendaText']",
-                "minutes_selector": "a[href*='MinutesText']",
-                "meeting_row_selector": "tr.rgRow, tr.rgAltRow",
-                "date_selector": "td:nth-child(1)",
-                "title_selector": "td:nth-child(2)",
-                "status_selector": "td:nth-child(3)"
-            },
-            "gainesville_gov": {
-                # New Gainesville.gov portal (migrated from Legistar in 2020)
-                "meeting_list_path": "",  # Full URL provided
-                "agenda_selector": "a[href*='agenda'], a[title*='Agenda']",
-                "minutes_selector": "a[href*='minutes'], a[title*='Minutes']",
-                "meeting_row_selector": ".meeting-item, .agenda-item, tr",
-                "date_selector": ".meeting-date, .date, td:first-child",
-                "title_selector": ".meeting-title, .title, td:nth-child(2)",
-                "status_selector": ".meeting-status, .status, td:nth-child(3)"
-            },
-            "granicus": {
-                "meeting_list_path": "/ViewPublishedSearch.cfm",
-                "agenda_selector": "a[title*='Agenda']",
-                "minutes_selector": "a[title*='Minutes']",
-                "meeting_row_selector": ".meeting-row",
-                "date_selector": ".meeting-date",
-                "title_selector": ".meeting-title",
-                "status_selector": ".meeting-status"
-            },
-            "custom": {
-                # Default selectors that work with many generic portals
-                "meeting_list_path": "",
-                "agenda_selector": "a[href*='agenda']",
-                "minutes_selector": "a[href*='minutes']",
-                "meeting_row_selector": "tr, .meeting",
-                "date_selector": ".date, .meeting-date",
-                "title_selector": ".title, .meeting-title",
-                "status_selector": ".status, .meeting-status"
-            }
+        # eScribe AJAX endpoints configuration
+        self.escribe_endpoints = {
+            "calendar_meetings": "/MeetingsCalendarView.aspx/GetCalendarMeetings",
+            "meeting_detail": "/MeetingDetailView.aspx/GetMeetingDetail",
+            "agenda_items": "/AgendaView.aspx/GetAgendaItems"
         }
 
-        self.config = self.portal_configs.get(self.portal_type, self.portal_configs["custom"])
+        # Development-focused meeting types to monitor
+        self.target_meeting_types = {
+            "City Commission": MeetingType.CITY_COMMISSION,
+            "Development Review Board": MeetingType.DEVELOPMENT_REVIEW_BOARD,
+            "Plan Board": MeetingType.PLAN_BOARD,
+            "Historic Preservation Board": MeetingType.HISTORIC_PRESERVATION,
+            "SHIP - Affordable Housing Advisory Committee": MeetingType.HOUSING_ADVISORY,
+            "CRA Advisory Board - Downtown": MeetingType.CRA_DOWNTOWN,
+            "CRA Advisory Board - Eastside": MeetingType.CRA_EASTSIDE,
+            "Board of Adjustment": MeetingType.BOARD_OF_ADJUSTMENT,
+            "Tree Advisory Board": MeetingType.TREE_ADVISORY,
+            "Public Works Committee": MeetingType.PUBLIC_WORKS,
+            "Utility Advisory Board": MeetingType.UTILITY_ADVISORY
+        }
+
+        # Headers to bypass CloudFlare
+        self.ajax_headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Content-Type': 'application/json; charset=utf-8',
+            'Accept': 'application/json, text/javascript, */*; q=0.01'
+        }
 
     async def scrape_meeting_list(
         self,
@@ -232,7 +273,7 @@ class CityCouncilScraper(ResilientScraper):
         limit: int = 50
     ) -> List[CouncilMeeting]:
         """
-        Scrape list of council meetings from the portal.
+        Scrape list of council meetings using eScribe AJAX endpoints.
 
         Args:
             start_date: Start date for meeting search
@@ -244,38 +285,75 @@ class CityCouncilScraper(ResilientScraper):
         if not end_date:
             end_date = datetime.now() + timedelta(days=30)    # Next month
 
-        meeting_list_url = self.portal_base_url + self.config["meeting_list_path"]
+        # Use eScribe AJAX endpoint to get calendar meetings
+        calendar_url = self.portal_base_url + self.escribe_endpoints["calendar_meetings"]
 
-        # Get meeting list page
-        result = await self.scrape(meeting_list_url)
-        if not result.success:
-            self.logger.error(f"Failed to fetch meeting list: {result.error}")
+        # Prepare AJAX request payload
+        payload = {
+            "startDate": start_date.strftime("%Y-%m-%d"),
+            "endDate": end_date.strftime("%Y-%m-%d"),
+            "maxResults": limit
+        }
+
+        meetings = []
+
+        try:
+            # Make AJAX request
+            async with self.session.post(
+                calendar_url,
+                json=payload,
+                headers=self.ajax_headers
+            ) as response:
+                if response.status != 200:
+                    self.logger.error(f"Failed to fetch calendar data: HTTP {response.status}")
+                    return []
+
+                data = await response.json()
+                meetings = await self._parse_escribe_calendar(data, start_date, end_date)
+
+        except Exception as e:
+            self.logger.error(f"Failed to fetch meetings from eScribe: {e}")
             return []
 
-        # Parse meeting list
-        soup = BeautifulSoup(result.data, 'html.parser')
-        meetings = await self._parse_meeting_list(soup, start_date, end_date, limit)
+        # Filter by development-related meetings only
+        development_meetings = []
+        for meeting in meetings:
+            if meeting.board_name in self.target_meeting_types:
+                meeting.meeting_type = self.target_meeting_types[meeting.board_name]
+                development_meetings.append(meeting)
 
-        self.logger.info(f"Found {len(meetings)} meetings in date range")
-        return meetings
+        self.logger.info(f"Found {len(development_meetings)} development-related meetings out of {len(meetings)} total")
+        return development_meetings
 
     async def scrape_meeting_details(self, meeting: CouncilMeeting) -> CouncilMeeting:
         """
-        Scrape detailed information for a specific meeting including documents.
+        Scrape detailed information for a specific meeting using eScribe AJAX.
 
         Args:
             meeting: Basic meeting info to enhance with details
         """
         try:
-            # Download and process agenda
+            # Get meeting details from eScribe
+            if meeting.escribe_meeting_id:
+                meeting_details = await self._get_escribe_meeting_detail(meeting.escribe_meeting_id)
+                if meeting_details:
+                    # Update meeting with detailed info
+                    meeting = self._merge_meeting_details(meeting, meeting_details)
+
+            # Get agenda items with development petitions
+            if meeting.escribe_meeting_id:
+                agenda_items = await self._get_escribe_agenda_items(meeting.escribe_meeting_id)
+                if agenda_items:
+                    meeting.agenda_items = agenda_items
+
+            # Download and process agenda PDF if available
             if meeting.agenda_url:
-                agenda_text, agenda_items = await self._process_document(
+                agenda_text, _ = await self._process_document(
                     meeting.agenda_url, DocumentType.AGENDA
                 )
                 meeting.agenda_text = agenda_text
-                meeting.agenda_items = agenda_items or []
 
-            # Download and process minutes
+            # Download and process minutes PDF if available
             if meeting.minutes_url:
                 minutes_text, _ = await self._process_document(
                     meeting.minutes_url, DocumentType.MINUTES
@@ -435,6 +513,345 @@ class CityCouncilScraper(ResilientScraper):
     async def process_response(self, content: bytes, response: aiohttp.ClientResponse) -> Any:
         """Process web response from council portal."""
         return content.decode('utf-8', errors='ignore')
+
+    async def _parse_escribe_calendar(
+        self,
+        calendar_data: dict,
+        start_date: datetime,
+        end_date: datetime
+    ) -> List[CouncilMeeting]:
+        """Parse meeting list from eScribe calendar JSON response."""
+        meetings = []
+
+        if not calendar_data or 'd' not in calendar_data:
+            self.logger.warning("Invalid calendar data received from eScribe")
+            return meetings
+
+        calendar_meetings = calendar_data.get('d', [])
+
+        for meeting_data in calendar_meetings:
+            try:
+                meeting = await self._parse_escribe_meeting_item(meeting_data)
+                if meeting and start_date <= meeting.meeting_date <= end_date:
+                    meetings.append(meeting)
+
+            except Exception as e:
+                self.logger.warning(f"Failed to parse meeting item: {e}")
+                continue
+
+        return meetings
+
+    async def _parse_escribe_meeting_item(self, meeting_data: dict) -> Optional[CouncilMeeting]:
+        """Parse individual meeting from eScribe JSON."""
+        try:
+            # Extract basic meeting info
+            meeting_id = meeting_data.get('MeetingId', '')
+            calendar_id = meeting_data.get('CalendarId', '')
+            board_name = meeting_data.get('BoardName', '').strip()
+
+            # Parse meeting date
+            date_str = meeting_data.get('MeetingDate', '')
+            meeting_date = self._parse_escribe_date(date_str)
+            if not meeting_date:
+                return None
+
+            # Check if cancelled or rescheduled
+            status_text = meeting_data.get('Status', '').lower()
+            is_cancelled = 'cancel' in status_text
+            is_rescheduled = 'reschedule' in status_text or 'postpone' in status_text
+
+            status = MeetingStatus.SCHEDULED
+            if is_cancelled:
+                status = MeetingStatus.CANCELLED
+            elif is_rescheduled:
+                status = MeetingStatus.POSTPONED
+            elif 'complete' in status_text:
+                status = MeetingStatus.COMPLETED
+
+            # Extract time and location
+            start_time = meeting_data.get('StartTime', '')
+            location = meeting_data.get('Location', '')
+
+            # Extract document URLs
+            agenda_url = meeting_data.get('AgendaUrl', '')
+            minutes_url = meeting_data.get('MinutesUrl', '')
+            video_url = meeting_data.get('VideoUrl', '')
+
+            # Generate meeting ID
+            meeting_id_str = f"{meeting_date.strftime('%Y%m%d')}_{board_name.replace(' ', '_')}_{meeting_id}"
+
+            return CouncilMeeting(
+                meeting_id=meeting_id_str,
+                meeting_date=meeting_date,
+                board_name=board_name,
+                status=status,
+                title=f"{board_name} Meeting",
+                location=location,
+                start_time=start_time,
+                agenda_url=agenda_url if agenda_url else None,
+                minutes_url=minutes_url if minutes_url else None,
+                video_url=video_url if video_url else None,
+                escribe_meeting_id=meeting_id,
+                calendar_id=calendar_id,
+                is_cancelled=is_cancelled,
+                is_rescheduled=is_rescheduled,
+                portal_url=self.portal_base_url
+            )
+
+        except Exception as e:
+            self.logger.debug(f"Error parsing eScribe meeting item: {e}")
+            return None
+
+    async def _get_escribe_meeting_detail(self, meeting_id: str) -> Optional[dict]:
+        """Get detailed meeting information from eScribe."""
+        detail_url = self.portal_base_url + self.escribe_endpoints["meeting_detail"]
+
+        payload = {
+            "meetingId": meeting_id
+        }
+
+        try:
+            async with self.session.post(
+                detail_url,
+                json=payload,
+                headers=self.ajax_headers
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get('d', {}) if data else {}
+                else:
+                    self.logger.warning(f"Failed to get meeting detail: HTTP {response.status}")
+                    return None
+
+        except Exception as e:
+            self.logger.error(f"Error fetching meeting detail for {meeting_id}: {e}")
+            return None
+
+    async def _get_escribe_agenda_items(self, meeting_id: str) -> List[AgendaItem]:
+        """Get agenda items from eScribe with development petition extraction."""
+        agenda_url = self.portal_base_url + self.escribe_endpoints["agenda_items"]
+
+        payload = {
+            "meetingId": meeting_id
+        }
+
+        try:
+            async with self.session.post(
+                agenda_url,
+                json=payload,
+                headers=self.ajax_headers
+            ) as response:
+                if response.status != 200:
+                    self.logger.warning(f"Failed to get agenda items: HTTP {response.status}")
+                    return []
+
+                data = await response.json()
+                agenda_data = data.get('d', []) if data else []
+
+                agenda_items = []
+                for item_data in agenda_data:
+                    item = await self._parse_escribe_agenda_item(item_data)
+                    if item:
+                        agenda_items.append(item)
+
+                return agenda_items
+
+        except Exception as e:
+            self.logger.error(f"Error fetching agenda items for {meeting_id}: {e}")
+            return []
+
+    async def _parse_escribe_agenda_item(self, item_data: dict) -> Optional[AgendaItem]:
+        """Parse individual agenda item from eScribe JSON and extract development petitions."""
+        try:
+            item_number = item_data.get('ItemNumber', '').strip()
+            title = item_data.get('Title', '').strip()
+            description = item_data.get('Description', '').strip()
+
+            if not item_number or not title:
+                return None
+
+            # Extract petition ID if present (LD25-XXXXXX format)
+            petition_match = re.search(r'LD\d{2}-\d{6}', title + ' ' + description)
+            development_petition = None
+            affects_real_estate = False
+            assemblage_signal = False
+
+            if petition_match:
+                petition_id = petition_match.group(0)
+                development_petition = await self._extract_development_petition(
+                    petition_id, title, description
+                )
+                affects_real_estate = True
+
+            # Check for real estate keywords even without petition ID
+            real_estate_keywords = [
+                'zoning', 'rezoning', 'variance', 'site plan', 'subdivision',
+                'development', 'property', 'land use', 'building permit',
+                'comprehensive plan', 'annexation', 'assemblage'
+            ]
+
+            title_desc_lower = (title + ' ' + description).lower()
+            if any(keyword in title_desc_lower for keyword in real_estate_keywords):
+                affects_real_estate = True
+
+            # Check for assemblage signals
+            assemblage_keywords = [
+                'multiple properties', 'adjacent parcels', 'assemblage',
+                'master plan', 'phased development', 'multiple lots'
+            ]
+            if any(keyword in title_desc_lower for keyword in assemblage_keywords):
+                assemblage_signal = True
+
+            # Determine item type
+            item_type = self._classify_agenda_item(title)
+            if development_petition:
+                if 'rezoning' in title.lower():
+                    item_type = DocumentType.REZONING_REQUEST
+                elif 'variance' in title.lower():
+                    item_type = DocumentType.VARIANCE_APPLICATION
+                else:
+                    item_type = DocumentType.DEVELOPMENT_APPLICATION
+
+            return AgendaItem(
+                item_number=item_number,
+                title=title,
+                description=description,
+                item_type=item_type,
+                development_petition=development_petition,
+                affects_real_estate=affects_real_estate,
+                assemblage_signal=assemblage_signal
+            )
+
+        except Exception as e:
+            self.logger.debug(f"Error parsing agenda item: {e}")
+            return None
+
+    async def _extract_development_petition(
+        self,
+        petition_id: str,
+        title: str,
+        description: str
+    ) -> Optional[DevelopmentPetition]:
+        """Extract development petition details from agenda item text."""
+        try:
+            combined_text = f"{title} {description}"
+
+            # Extract petition type
+            petition_type = "Unknown"
+            if 'rezoning' in combined_text.lower():
+                petition_type = "Rezoning"
+            elif 'site plan' in combined_text.lower():
+                petition_type = "Site Plan"
+            elif 'variance' in combined_text.lower():
+                petition_type = "Variance"
+            elif 'subdivision' in combined_text.lower():
+                petition_type = "Subdivision"
+
+            # Extract address patterns
+            address_patterns = [
+                r'\d{1,5}\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Boulevard|Blvd|Lane|Ln|Way|Circle|Cir|Court|Ct)',
+                r'[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Boulevard|Blvd|Lane|Ln|Way|Circle|Cir|Court|Ct)'
+            ]
+
+            property_address = None
+            for pattern in address_patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    property_address = match.group(0).strip()
+                    break
+
+            # Extract zoning information
+            zoning_pattern = r'from\s+([A-Z\-\d]+)\s+to\s+([A-Z\-\d]+)'
+            zoning_match = re.search(zoning_pattern, combined_text, re.IGNORECASE)
+            current_zoning = None
+            proposed_zoning = None
+
+            if zoning_match:
+                current_zoning = zoning_match.group(1)
+                proposed_zoning = zoning_match.group(2)
+
+            # Extract applicant information
+            applicant_patterns = [
+                r'applicant:?\s*([^,\n]+)',
+                r'petitioner:?\s*([^,\n]+)',
+                r'by\s+([A-Za-z\s]+(?:LLC|Inc|Corp|Company))',
+            ]
+
+            applicant_name = None
+            for pattern in applicant_patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    applicant_name = match.group(1).strip()
+                    break
+
+            return DevelopmentPetition(
+                petition_id=petition_id,
+                petition_type=petition_type,
+                property_address=property_address,
+                applicant_name=applicant_name,
+                description=description[:500] if description else None,
+                current_zoning=current_zoning,
+                proposed_zoning=proposed_zoning,
+                development_details=combined_text[:1000]
+            )
+
+        except Exception as e:
+            self.logger.debug(f"Error extracting development petition {petition_id}: {e}")
+            return None
+
+    def _parse_escribe_date(self, date_str: str) -> Optional[datetime]:
+        """Parse date from eScribe JSON format."""
+        if not date_str:
+            return None
+
+        # eScribe often uses Microsoft JSON date format: /Date(timestamp)/
+        json_date_match = re.search(r'/Date\((\d+)\)/', date_str)
+        if json_date_match:
+            timestamp = int(json_date_match.group(1)) / 1000  # Convert to seconds
+            return datetime.fromtimestamp(timestamp)
+
+        # Try standard date formats
+        for fmt in [
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d",
+            "%m/%d/%Y %I:%M %p",
+            "%m/%d/%Y"
+        ]:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+
+        return None
+
+    def _merge_meeting_details(self, meeting: CouncilMeeting, details: dict) -> CouncilMeeting:
+        """Merge additional details from eScribe meeting detail response."""
+        try:
+            # Update location if more detailed
+            if details.get('Location') and not meeting.location:
+                meeting.location = details['Location']
+
+            # Update times
+            if details.get('StartTime') and not meeting.start_time:
+                meeting.start_time = details['StartTime']
+
+            if details.get('EndTime') and not meeting.end_time:
+                meeting.end_time = details['EndTime']
+
+            # Update document URLs if better ones available
+            if details.get('AgendaPacketUrl') and not meeting.agenda_url:
+                meeting.agenda_url = details['AgendaPacketUrl']
+
+            # Add video URL if available
+            if details.get('VideoUrl') and not meeting.video_url:
+                meeting.video_url = details['VideoUrl']
+
+            return meeting
+
+        except Exception as e:
+            self.logger.debug(f"Error merging meeting details: {e}")
+            return meeting
 
     async def _parse_meeting_list(
         self,
