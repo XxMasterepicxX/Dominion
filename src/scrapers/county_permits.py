@@ -1,129 +1,85 @@
 """
-Alachua County Permits Scraper
+Alachua County Permits Scraper (via CitizenServe Portal)
 
-Handles permit tracking for Alachua County jurisdiction using browser automation.
-Separate from City of Gainesville permits which use the CitizenServe portal.
+Provides real-time permit data for Alachua County (outside Gainesville city limits).
+Uses CitizenServe portal with browser automation to bypass reCAPTCHA v3.
 
 Coverage: Building, Electrical, Plumbing, Mechanical, Zoning, Subdivision permits
 Jurisdiction: Alachua County (outside Gainesville city limits)
 
-Uses Patchright for stealth automation on JavaScript-heavy permit portals.
+Report Types:
+- Applied (ID 359): Permits applied for during date range
+- Issued (ID 360): Permits issued during date range
+- Closed (ID 379): Permits closed/completed during date range
 """
+
 import asyncio
-import hashlib
 import json
-import logging
-import re
+import os
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional
 from enum import Enum
-from urllib.parse import urljoin, urlparse
 
-from bs4 import BeautifulSoup
-from patchright.async_api import Page, Browser, BrowserContext, TimeoutError as PatchrightTimeoutError
+import pandas as pd
+import structlog
 from pydantic import BaseModel, Field, validator
+
+# Patchright for undetected browser automation
+from patchright.async_api import async_playwright
+
+# Add BypassV3 to path for reCAPTCHA bypassing
+sys.path.append(str(Path(__file__).parent / "BypassV3"))
+from bypass import ReCaptchaV3Bypass
 
 from .base.resilient_scraper import ResilientScraper, ScraperType, ScrapingResult
 from ..database.connection import DatabaseManager
 from .base.change_detector import ChangeDetector
 
-
-class PermitStatus(Enum):
-    """Permit status values."""
-    SUBMITTED = "submitted"
-    UNDER_REVIEW = "under_review"
-    APPROVED = "approved"
-    ISSUED = "issued"
-    DENIED = "denied"
-    EXPIRED = "expired"
-    CANCELLED = "cancelled"
-    ON_HOLD = "on_hold"
-    PENDING = "pending"
-    UNKNOWN = "unknown"
+logger = structlog.get_logger("dominion.scrapers.county_permits")
 
 
-class PermitType(Enum):
-    """County permit types."""
-    BUILDING = "building"
-    ELECTRICAL = "electrical"
-    PLUMBING = "plumbing"
-    MECHANICAL = "mechanical"
-    ZONING = "zoning"
-    SUBDIVISION = "subdivision"
-    SITE_PLAN = "site_plan"
-    VARIANCE = "variance"
-    SPECIAL_USE = "special_use"
-    DEMOLITION = "demolition"
-    SIGN = "sign"
-    TREE_REMOVAL = "tree_removal"
-    SEPTIC = "septic"
-    DRIVEWAY = "driveway"
-    OTHER = "other"
+class CountyReportType(Enum):
+    """Available county permit report types."""
+    APPLIED = {"id": 359, "name": "Permits Applied For", "description": "Applications submitted"}
+    ISSUED = {"id": 360, "name": "Permits Issued", "description": "Permits approved and active"}
+    CLOSED = {"id": 379, "name": "Permits Closed", "description": "Permits completed/closed"}
 
 
 class CountyPermitRecord(BaseModel):
-    """Model for county permit data."""
+    """Model for CitizenServe county permit data."""
     permit_number: str = Field(..., min_length=1)
-    permit_type: PermitType = PermitType.OTHER
-    permit_subtype: Optional[str] = None
-    status: PermitStatus = PermitStatus.UNKNOWN
-    application_date: datetime
-    issued_date: Optional[datetime] = None
-    expiration_date: Optional[datetime] = None
-    completed_date: Optional[datetime] = None
-
-    # Project details
-    project_description: str = Field(..., min_length=1)
-    project_address: str = Field(..., min_length=1)
+    permit_type: str
+    sub_type: Optional[str] = None
+    address: str
+    address_city: Optional[str] = None
+    address_zip: Optional[str] = None
     parcel_number: Optional[str] = None
-    estimated_value: Optional[float] = None
-    square_footage: Optional[float] = None
+    jurisdiction: Optional[str] = None
+    description: str
+    classification: Optional[str] = None
+    status: Optional[str] = None
+    applicant: Optional[str] = None
+    contractor: Optional[str] = None
+    contractor_address: Optional[str] = None
+    contractor_phone: Optional[str] = None
+    application_date: datetime
+    issue_date: Optional[datetime] = None
+    approval_date: Optional[datetime] = None
+    expiration_date: Optional[datetime] = None
+    close_date: Optional[datetime] = None
+    construction_cost: Optional[float] = None
+    valuation: Optional[float] = None
+    report_type: str  # applied, issued, or closed
 
-    # Applicant information
-    applicant_name: str = Field(..., min_length=1)
-    applicant_address: Optional[str] = None
-    applicant_phone: Optional[str] = None
-    contractor_name: Optional[str] = None
-    contractor_license: Optional[str] = None
-
-    # Review details
-    plan_reviewer: Optional[str] = None
-    inspector: Optional[str] = None
-    review_comments: Optional[str] = None
-    conditions: Optional[List[str]] = None
-
-    # Geographic data
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    district: Optional[str] = None
-    zone: Optional[str] = None
-
-    # Fees
-    permit_fee: Optional[float] = None
-    impact_fee: Optional[float] = None
-    total_fees: Optional[float] = None
-    fees_paid: Optional[float] = None
-
-    # Data source
-    portal_url: str
-    scraped_at: datetime = Field(default_factory=datetime.utcnow)
-
-    @validator('application_date', 'issued_date', 'expiration_date', 'completed_date', pre=True)
+    @validator('application_date', 'issue_date', 'approval_date', 'expiration_date', 'close_date', pre=True)
     def parse_dates(cls, v):
-        if v is None or v == "":
+        if v is None or v == "" or pd.isna(v):
             return None
         if isinstance(v, str):
-            # Handle multiple date formats
-            for fmt in [
-                "%Y-%m-%d %H:%M:%S",
-                "%Y-%m-%d",
-                "%m/%d/%Y %H:%M:%S",
-                "%m/%d/%Y",
-                "%m-%d-%Y",
-                "%B %d, %Y",
-                "%b %d, %Y"
-            ]:
+            # Handle multiple date formats from CitizenServe
+            for fmt in ["%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y"]:
                 try:
                     return datetime.strptime(v, fmt)
                 except ValueError:
@@ -131,652 +87,516 @@ class CountyPermitRecord(BaseModel):
             raise ValueError(f"Unable to parse date: {v}")
         return v
 
-    @validator('estimated_value', 'square_footage', 'permit_fee', 'impact_fee',
-              'total_fees', 'fees_paid', 'latitude', 'longitude', pre=True)
-    def parse_numbers(cls, v):
-        if v is None or v == "" or v == "N/A":
+    @validator('construction_cost', 'valuation', pre=True)
+    def parse_cost(cls, v):
+        if v is None or v == "" or pd.isna(v):
             return None
-        if isinstance(v, str):
-            # Remove currency symbols and commas
-            v = v.replace('$', '').replace(',', '').replace('(', '').replace(')', '')
-            try:
-                return float(v) if v else None
-            except ValueError:
-                return None
-        return float(v) if v else None
-
-    @validator('conditions', pre=True)
-    def parse_conditions(cls, v):
-        if v is None or v == "":
+        try:
+            return float(v)
+        except (ValueError, TypeError):
             return None
-        if isinstance(v, str):
-            # Split by common separators
-            conditions = re.split(r'[;\n\|]', v)
-            return [condition.strip() for condition in conditions if condition.strip()]
-        return v
-
-    def classify_permit_type(self) -> PermitType:
-        """Classify permit type from permit number or description."""
-        text = f"{self.permit_number} {self.project_description}".lower()
-
-        # Classification patterns
-        if any(word in text for word in ['building', 'construction', 'residential', 'commercial']):
-            return PermitType.BUILDING
-        elif any(word in text for word in ['electrical', 'electric']):
-            return PermitType.ELECTRICAL
-        elif any(word in text for word in ['plumbing', 'plumb']):
-            return PermitType.PLUMBING
-        elif any(word in text for word in ['mechanical', 'hvac', 'air conditioning']):
-            return PermitType.MECHANICAL
-        elif any(word in text for word in ['zoning', 'variance', 'rezoning']):
-            return PermitType.ZONING
-        elif any(word in text for word in ['subdivision', 'plat', 'subdivide']):
-            return PermitType.SUBDIVISION
-        elif any(word in text for word in ['site plan', 'site development']):
-            return PermitType.SITE_PLAN
-        elif any(word in text for word in ['demolition', 'demolish', 'demo']):
-            return PermitType.DEMOLITION
-        elif any(word in text for word in ['sign', 'signage']):
-            return PermitType.SIGN
-        elif any(word in text for word in ['tree', 'removal', 'clearing']):
-            return PermitType.TREE_REMOVAL
-        elif any(word in text for word in ['septic', 'sewage', 'waste']):
-            return PermitType.SEPTIC
-        elif any(word in text for word in ['driveway', 'access', 'approach']):
-            return PermitType.DRIVEWAY
-        else:
-            return PermitType.OTHER
-
-    def classify_status(self, status_text: str) -> PermitStatus:
-        """Classify permit status from text."""
-        status_lower = status_text.lower()
-
-        if any(word in status_lower for word in ['issued', 'active']):
-            return PermitStatus.ISSUED
-        elif any(word in status_lower for word in ['approved', 'accept']):
-            return PermitStatus.APPROVED
-        elif any(word in status_lower for word in ['submitted', 'received', 'intake']):
-            return PermitStatus.SUBMITTED
-        elif any(word in status_lower for word in ['review', 'processing', 'examining']):
-            return PermitStatus.UNDER_REVIEW
-        elif any(word in status_lower for word in ['denied', 'rejected']):
-            return PermitStatus.DENIED
-        elif any(word in status_lower for word in ['expired', 'expire']):
-            return PermitStatus.EXPIRED
-        elif any(word in status_lower for word in ['cancelled', 'withdrawn', 'void']):
-            return PermitStatus.CANCELLED
-        elif any(word in status_lower for word in ['hold', 'suspended']):
-            return PermitStatus.ON_HOLD
-        elif any(word in status_lower for word in ['pending']):
-            return PermitStatus.PENDING
-        else:
-            return PermitStatus.UNKNOWN
-
-
-class PermitPortalConfig(BaseModel):
-    """Configuration for permit portal interactions."""
-    portal_url: str = Field(..., min_length=1)
-    portal_type: str = Field(default="generic")  # alachua, generic, tyler, etc.
-
-    # Navigation selectors
-    search_form_selector: Optional[str] = None
-    date_from_selector: Optional[str] = None
-    date_to_selector: Optional[str] = None
-    search_button_selector: Optional[str] = None
-    results_table_selector: Optional[str] = None
-    next_page_selector: Optional[str] = None
-    permit_detail_link_selector: Optional[str] = None
-
-    # Data extraction selectors
-    field_selectors: Optional[Dict[str, str]] = None
-
-    # Interaction settings
-    wait_timeout_ms: int = Field(default=30000, ge=1000, le=120000)
-    page_load_delay_ms: int = Field(default=2000, ge=0, le=10000)
-    between_requests_delay_ms: int = Field(default=1000, ge=100, le=10000)
-
-    # Browser settings
-    headless: bool = Field(default=True)
-    user_agent: Optional[str] = None
-    viewport_width: int = Field(default=1920, ge=800, le=3840)
-    viewport_height: int = Field(default=1080, ge=600, le=2160)
 
 
 class CountyPermitsScraper(ResilientScraper):
     """
-    Alachua County permits scraper using Patchright for stealth automation.
-
-    Handles county permit portals that require browser automation with anti-detection.
-    Covers permits outside Gainesville city limits with stealth capabilities.
+    Alachua County permits scraper using CitizenServe portal.
+    Provides real-time permit data with stealth automation via Patchright.
+    Handles 3 report types: Applied, Issued, and Closed permits.
     """
 
-    def __init__(
-        self,
-        db_manager: DatabaseManager,
-        change_detector: ChangeDetector,
-        portal_config: PermitPortalConfig,
-        **kwargs
-    ):
+    def __init__(self,
+                 download_dir: Optional[str] = None,
+                 db_manager: Optional[DatabaseManager] = None,
+                 change_detector: Optional[ChangeDetector] = None):
         super().__init__(
-            scraper_id="county_permits_playwright",
             scraper_type=ScraperType.WEB,
-            enable_js=True,
-            **kwargs
+            name="county_permits",
+            base_url="https://www6.citizenserve.com"
         )
+
+        self.download_dir = Path(download_dir or os.getenv('DOWNLOAD_DIR', './downloads'))
+        self.download_dir.mkdir(parents=True, exist_ok=True)
+
+        # Configuration from environment
+        self.headless = os.getenv('HEADLESS', 'false').lower() == 'true'
+        self.timeout = int(os.getenv('TIMEOUT', '30000'))
+
+        # County-specific reCAPTCHA anchor URL (www6 instead of www4)
+        self.recaptcha_anchor_url = (
+            'https://www.google.com/recaptcha/api2/anchor?ar=1&k='
+            '6LeKdrMZAAAAAHhaf46zpFeRsB-VLv8kRAqKVrEW&co=aHR0cHM6Ly93d3c2'
+            'LmNpdGl6ZW5zZXJ2ZS5jb206NDQz&hl=en&v=1aEzDFnIBfL6Zd_MU9G3Luhj'
+            '&size=invisible&cb=123456789'
+        )
+
         self.db_manager = db_manager
-        self.change_detector = change_detector
-        self.config = portal_config
+        self.change_detector = change_detector or ChangeDetector("county_permits")
 
-        # Portal-specific configurations
-        self.portal_configs = {
-            "alachua": {
-                "search_form_selector": "#searchForm",
-                "date_from_selector": "input[name='dateFrom']",
-                "date_to_selector": "input[name='dateTo']",
-                "search_button_selector": "button[type='submit'], input[type='submit']",
-                "results_table_selector": ".results-table, #resultsTable, table",
-                "permit_detail_link_selector": "a[href*='permit'], a[href*='detail']",
-                "field_selectors": {
-                    "permit_number": ".permit-number, .permit-id",
-                    "status": ".status, .permit-status",
-                    "project_description": ".description, .project-desc",
-                    "project_address": ".address, .location",
-                    "applicant_name": ".applicant, .owner",
-                    "application_date": ".app-date, .date-submitted"
-                }
-            },
-            "tyler": {
-                "search_form_selector": "form[name='searchForm']",
-                "date_from_selector": "#fromDate",
-                "date_to_selector": "#toDate",
-                "search_button_selector": "#searchButton",
-                "results_table_selector": "#searchResults table",
-                "permit_detail_link_selector": "a.permit-link"
-            },
-            "generic": {
-                "search_form_selector": "form, #searchForm, .search-form",
-                "date_from_selector": "input[type='date'], input[name*='from'], input[name*='start']",
-                "date_to_selector": "input[type='date'], input[name*='to'], input[name*='end']",
-                "search_button_selector": "button[type='submit'], input[type='submit'], .search-btn",
-                "results_table_selector": "table, .results, .permits-table",
-                "permit_detail_link_selector": "a[href*='permit'], a[href*='detail'], .permit-link"
-            }
-        }
+        logger.info("County permits scraper initialized", download_dir=str(self.download_dir))
 
-        # Merge portal-specific config with provided config
-        portal_defaults = self.portal_configs.get(self.config.portal_type, self.portal_configs["generic"])
-
-        if not self.config.search_form_selector:
-            self.config.search_form_selector = portal_defaults.get("search_form_selector")
-        if not self.config.field_selectors:
-            self.config.field_selectors = portal_defaults.get("field_selectors", {})
-
-        # Browser context will be managed per scraping session
-        self.context: Optional[BrowserContext] = None
-
-    async def scrape_permits(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-        permit_types: Optional[List[str]] = None,
-        max_permits: int = 1000
-    ) -> List[CountyPermitRecord]:
-        """
-        Scrape county permits using browser automation.
-
-        Args:
-            start_date: Start date for permit search
-            end_date: End date for permit search
-            permit_types: Specific permit types to filter
-            max_permits: Maximum permits to retrieve
-        """
-        if not start_date:
-            start_date = datetime.now() - timedelta(days=7)  # Last week
-        if not end_date:
-            end_date = datetime.now()
-
-        permits = []
-
+    async def _get_recaptcha_token(self) -> str:
+        """Generate reCAPTCHA v3 token using BypassV3."""
         try:
-            # Create browser context
-            self.context = await self.browser.new_context(
-                user_agent=self.config.user_agent or self.user_agent.random,
-                viewport={'width': self.config.viewport_width, 'height': self.config.viewport_height}
-            )
+            logger.info("Generating reCAPTCHA token...")
+            # Run in executor since BypassV3 is synchronous
+            loop = asyncio.get_event_loop()
+            bypass = ReCaptchaV3Bypass(self.recaptcha_anchor_url)
+            token = await loop.run_in_executor(None, bypass.bypass)
 
-            # Create new page
-            page = await self.context.new_page()
+            if not token:
+                raise ValueError("Failed to generate reCAPTCHA token")
 
-            self.logger.info(f"Navigating to permit portal: {self.config.portal_url}")
-
-            # Navigate to portal
-            await page.goto(self.config.portal_url,
-                           wait_until='networkidle',
-                           timeout=self.config.wait_timeout_ms)
-
-            # Wait for page to fully load
-            await asyncio.sleep(self.config.page_load_delay_ms / 1000)
-
-            # Perform search
-            search_results = await self._perform_permit_search(page, start_date, end_date)
-
-            if not search_results:
-                self.logger.warning("No search results found")
-                return permits
-
-            # Extract permits from search results
-            permits = await self._extract_permits_from_results(page, search_results, max_permits)
-
-            self.logger.info(f"Successfully scraped {len(permits)} permits")
+            logger.info("reCAPTCHA token generated successfully")
+            return token
 
         except Exception as e:
-            self.logger.error(f"Failed to scrape permits: {e}")
+            logger.error("reCAPTCHA token generation failed", error=str(e))
+            raise
 
-        finally:
-            # Clean up browser context
-            if self.context:
-                await self.context.close()
-                self.context = None
-
-        return permits
-
-    async def scrape_recent_permits(self, days_back: int = 7) -> List[CountyPermitRecord]:
+    async def scrape_permits_data(
+        self,
+        start_date: str,
+        end_date: str,
+        report_type: CountyReportType = CountyReportType.ISSUED
+    ) -> ScrapingResult:
         """
-        Scrape recent permits from the last N days.
+        Scrape county permits for date range using Playwright stealth automation.
 
         Args:
-            days_back: Number of days to look back
+            start_date: Start date in MM/DD/YYYY format
+            end_date: End date in MM/DD/YYYY format
+            report_type: Which report to scrape (APPLIED, ISSUED, or CLOSED)
+
+        Returns:
+            ScrapingResult with permit data or error information
         """
-        start_date = datetime.now() - timedelta(days=days_back)
-        end_date = datetime.now()
+        start_time = datetime.utcnow()
+        report_id = report_type.value["id"]
+        report_name = report_type.value["name"]
 
-        return await self.scrape_permits(start_date=start_date, end_date=end_date)
+        try:
+            logger.info(
+                "Starting county permit scrape",
+                start_date=start_date,
+                end_date=end_date,
+                report_type=report_name
+            )
 
-    async def monitor_new_permits(self) -> List[CountyPermitRecord]:
-        """Monitor for new permits since last check."""
-        # Check for changes in the portal
-        change_result = await self.change_detector.track_content_change(
-            url=self.config.portal_url,
-            content=b"",  # Will be filled by change detector
-            metadata={"scraper": self.scraper_id, "check_type": "monitor"}
-        )
+            # Get reCAPTCHA token
+            token = await self._get_recaptcha_token()
 
-        if change_result.change_type.value == "unchanged":
-            self.logger.debug("No changes detected in permit portal")
-            return []
+            # Use patchright for stealth scraping
+            async with async_playwright() as playwright:
+                # Launch browser with stealth configuration
+                browser = await playwright.chromium.launch(
+                    headless=self.headless,
+                    args=[
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-web-security',
+                        '--disable-features=VizDisplayCompositor'
+                    ]
+                )
 
-        # Get permits from last 24 hours
-        return await self.scrape_recent_permits(days_back=1)
+                context = await browser.new_context(
+                    viewport={'width': 1920, 'height': 1080},
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    accept_downloads=True
+                )
 
-    async def store_permits(self, permits: List[CountyPermitRecord]) -> int:
-        """Store county permits in database."""
-        if not permits:
-            return 0
+                context.set_default_timeout(self.timeout)
 
-        stored_count = 0
-
-        async with self.db_manager.get_session() as session:
-            for permit in permits:
                 try:
-                    # Create raw fact entry
-                    fact_data = {
-                        "permit_data": permit.dict(),
-                        "scraped_from": "county_permits",
-                        "scraper_version": "1.0",
-                        "portal_type": self.config.portal_type,
-                        "processing_notes": {
-                            "data_quality": "browser_automated_extraction",
-                            "confidence": 0.90,  # Slightly lower due to complex extraction
-                            "source_type": "county_permit_portal",
-                            "permit_type": permit.permit_type.value,
-                            "permit_status": permit.status.value,
-                            "has_financial_data": any([permit.permit_fee, permit.total_fees]),
-                            "has_geographic_data": all([permit.latitude, permit.longitude])
-                        }
-                    }
+                    page = await context.new_page()
 
-                    # Calculate content hash
-                    content_str = json.dumps(fact_data, sort_keys=True, default=str)
-                    content_hash = hashlib.md5(content_str.encode()).hexdigest()
-
-                    # Insert raw fact
-                    query = """
-                        INSERT INTO raw_facts (
-                            fact_type, source_url, scraped_at, parser_version,
-                            raw_content, content_hash, processed_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        ON CONFLICT (content_hash) DO NOTHING
-                        RETURNING id
-                    """
-
-                    result = await session.execute(
-                        query,
-                        "county_permit_filing",
-                        f"{self.config.portal_url}?permit={permit.permit_number}",
-                        datetime.utcnow(),
-                        "county_permits_playwright_v1.0",
-                        json.dumps(fact_data),
-                        content_hash,
-                        datetime.utcnow()
+                    # Navigate to county reports page (Installation ID 318 for county)
+                    logger.info("Navigating to CitizenServe reports page...")
+                    await page.goto(
+                        "https://www6.citizenserve.com/Portal/PortalController?"
+                        "Action=showPortalReports&ctzPagePrefix=Portal_&installationID=318"
+                        "&original_iid=0&original_contactID=0"
                     )
+                    await page.wait_for_load_state("networkidle")
 
-                    if result.rowcount > 0:
-                        stored_count += 1
+                    # Click report using XPath (text selector would match wrong report)
+                    # Cannot use "Permits Issued" text because it matches "Permits Issued Map" (767)
+                    logger.info(f"Selecting report: {report_name} (ID {report_id})...")
+                    report_link = await page.wait_for_selector(
+                        f"xpath=//a[contains(@href, 'getQuery({report_id}')]",
+                        timeout=10000
+                    )
+                    await report_link.click()
+                    logger.info(f"Clicked {report_name} link")
 
-                        # Create structured fact
-                        raw_fact_id = (await result.fetchone())['id']
+                    # Wait for form to load
+                    await page.wait_for_load_state("networkidle")
 
-                        structured_query = """
-                            INSERT INTO structured_facts (
-                                raw_fact_id, entity_type, structured_data, extraction_confidence
-                            ) VALUES ($1, $2, $3, $4)
-                        """
+                    # Verify form is present
+                    form = await page.wait_for_selector("#Frm_QueryTool", timeout=10000)
+                    if not form:
+                        raise Exception("Could not find permit query form")
 
-                        await session.execute(
-                            structured_query,
-                            raw_fact_id,
-                            "county_permit",
-                            json.dumps(permit.dict(), default=str),
-                            0.90  # Browser automation confidence
+                    logger.info("Form loaded successfully with valid session")
+
+                    # Fill form fields
+                    logger.info("Filling form fields...")
+
+                    # From Date (Param_0 for county, different from city which uses Param_1)
+                    param0 = await page.wait_for_selector("input[name='Param_0']")
+                    await param0.fill("")
+                    await param0.fill(start_date)
+                    logger.info(f"Set From Date: {start_date}")
+
+                    # To Date (Param_1 for county, different from city which uses Param_2)
+                    param1 = await page.wait_for_selector("input[name='Param_1']")
+                    await param1.fill("")
+                    await param1.fill(end_date)
+                    logger.info(f"Set To Date: {end_date}")
+
+                    # Permit Type is optional (Param_2) - leave blank for all types
+
+                    # Handle human verification checkbox
+                    try:
+                        human_checkbox = await page.wait_for_selector("#noparam-checkbox", timeout=5000)
+                        if not await human_checkbox.is_checked():
+                            await human_checkbox.check()
+                            logger.info("Checked 'I am human' checkbox")
+                    except:
+                        logger.info("Human checkbox not found - may not be required")
+
+                    # Set reCAPTCHA token as fallback
+                    try:
+                        recaptcha_field = await page.wait_for_selector(
+                            "input[name='g-recaptcha-response']",
+                            timeout=5000
+                        )
+                        await page.evaluate(f"arguments[0].value = '{token}';", recaptcha_field)
+                        logger.info("reCAPTCHA token set (fallback)")
+                    except:
+                        logger.info("reCAPTCHA field not found - using human checkbox instead")
+
+                    # Submit form
+                    logger.info("Submitting permit query...")
+                    try:
+                        submit_link = await page.wait_for_selector("#submitLink", timeout=5000)
+                        await submit_link.click()
+                        logger.info("Clicked Submit link")
+                    except:
+                        try:
+                            await page.evaluate("runQuery();")
+                            logger.info("Used JavaScript runQuery() function")
+                        except:
+                            form = await page.wait_for_selector("#Frm_QueryTool")
+                            await form.evaluate("form => form.submit()")
+                            logger.info("Used form.submit() as last resort")
+
+                    # Wait for results
+                    await page.wait_for_load_state("networkidle")
+                    await page.wait_for_timeout(2000)  # Small delay for dynamic content
+
+                    # Check if results loaded (county permit patterns)
+                    page_text = await page.text_content("body")
+                    has_permits = any(pattern in page_text for pattern in [
+                        'BLD', 'ELE', 'PLU', 'MEC',  # County permit prefixes
+                        'Permit', 'Application'       # Generic indicators
+                    ])
+
+                    if not has_permits:
+                        logger.warning("No permit data found for date range")
+                        return ScrapingResult(
+                            success=True,
+                            data=[],
+                            response_time=(datetime.utcnow() - start_time).total_seconds()
                         )
 
-                except Exception as e:
-                    self.logger.error(f"Failed to store permit {permit.permit_number}: {e}")
-                    continue
+                    logger.info("SUCCESS! Permit data found in results!")
 
-            await session.commit()
+                    # Wait for export button and download
+                    logger.info("Waiting for export button...")
+                    export_icon = await page.wait_for_selector(
+                        "i.icon-external-link[title='Export']",
+                        timeout=self.timeout
+                    )
 
-        self.logger.info(f"Stored {stored_count} new county permits")
-        return stored_count
+                    if not export_icon:
+                        raise Exception("Export button not found")
 
-    async def get_permit_statistics(self, days: int = 30) -> Dict[str, Any]:
-        """Get statistics about recent county permits."""
-        async with self.db_manager.get_session() as session:
-            cutoff_date = datetime.utcnow() - timedelta(days=days)
+                    # Download Excel file
+                    async with page.expect_download() as download_info:
+                        logger.info("Clicking export button...")
+                        await export_icon.click()
 
-            # Permits by type and status
-            query = """
-                SELECT
-                    (structured_data->>'permit_type')::text as permit_type,
-                    (structured_data->>'status')::text as status,
-                    COUNT(*) as count,
-                    AVG((structured_data->>'estimated_value')::numeric) as avg_value
-                FROM structured_facts sf
-                JOIN raw_facts rf ON sf.raw_fact_id = rf.id
-                WHERE sf.entity_type = 'county_permit'
-                AND rf.fact_type = 'county_permit_filing'
-                AND rf.scraped_at >= $1
-                GROUP BY permit_type, status
-                ORDER BY count DESC
-            """
+                    download = await download_info.value
+                    report_type_str = report_type.name.lower()
+                    excel_filename = f"county_permits_{report_type_str}_{start_date.replace('/', '')}_{end_date.replace('/', '')}.xlsx"
+                    excel_path = self.download_dir / excel_filename
 
-            result = await session.execute(query, cutoff_date)
-            permit_stats = {}
+                    await download.save_as(str(excel_path))
+                    logger.info("Excel file downloaded", filename=excel_filename)
 
-            for row in await result.fetchall():
-                permit_type = row['permit_type']
-                status = row['status']
+                    # Process Excel data
+                    logger.info("Processing Excel data...")
+                    df = pd.read_excel(str(excel_path))
 
-                if permit_type not in permit_stats:
-                    permit_stats[permit_type] = {}
+                    # Convert to permit records
+                    permits = []
+                    for _, row in df.iterrows():
+                        try:
+                            # Map actual Excel column names to model fields
+                            permit_data = {
+                                'permit_number': str(row.get('Permit#', '')),
+                                'permit_type': str(row.get('Permit Type', '')),
+                                'sub_type': str(row.get('Sub Type', '')) if pd.notna(row.get('Sub Type')) else None,
+                                'address': str(row.get('Address', '')),
+                                'address_city': str(row.get('Address(City)', '')) if pd.notna(row.get('Address(City)')) else None,
+                                'address_zip': str(row.get('Address(ZIP)', '')) if pd.notna(row.get('Address(ZIP)')) else None,
+                                'parcel_number': str(row.get('Parcel#', '')) if pd.notna(row.get('Parcel#')) else None,
+                                'jurisdiction': str(row.get('Jurisdiction', '')) if pd.notna(row.get('Jurisdiction')) else None,
+                                'description': str(row.get('Work Description', '')) if pd.notna(row.get('Work Description')) else '',
+                                'classification': str(row.get('Classification', '')) if pd.notna(row.get('Classification')) else None,
+                                'status': str(row.get('Status', '')) if pd.notna(row.get('Status')) else None,
+                                'applicant': str(row.get('Applicant Company Name', '')) if pd.notna(row.get('Applicant Company Name')) else None,
+                                'contractor': str(row.get('Contractor Name', '')) if pd.notna(row.get('Contractor Name')) else None,
+                                'contractor_address': str(row.get('Contractor Address', '')) if pd.notna(row.get('Contractor Address')) else None,
+                                'contractor_phone': str(row.get('Contractor Phone #', '')) if pd.notna(row.get('Contractor Phone #')) else None,
+                                'application_date': row.get('Application Date'),
+                                'issue_date': row.get('Issue Date'),
+                                'approval_date': row.get('Approval Date'),
+                                'expiration_date': row.get('Expiration Date'),
+                                'close_date': row.get('Close Date'),
+                                'construction_cost': row.get('Estimated cost of construction'),
+                                'valuation': row.get('Valuation'),
+                                'report_type': report_type_str
+                            }
 
-                permit_stats[permit_type][status] = {
-                    'count': row['count'],
-                    'avg_value': float(row['avg_value']) if row['avg_value'] else 0
-                }
+                            permit = CountyPermitRecord(**permit_data)
+                            permits.append(permit.dict())
+                        except Exception as e:
+                            logger.warning(f"Failed to parse permit row: {e}", row_data=row.to_dict())
+                            continue
 
-            return {
-                'permit_breakdown': permit_stats,
-                'period_days': days,
-                'total_permits': sum(
-                    sum(statuses.values(), {}).get('count', 0)
-                    for statuses in permit_stats.values()
-                )
-            }
+                    # Calculate content hash for change detection
+                    content_hash = self.change_detector.calculate_hash(permits)
 
-    async def _perform_permit_search(
+                    response_time = (datetime.utcnow() - start_time).total_seconds()
+
+                    logger.info(
+                        "Scraping completed successfully",
+                        total_permits=len(permits),
+                        report_type=report_name,
+                        response_time=response_time
+                    )
+
+                    return ScrapingResult(
+                        success=True,
+                        data=permits,
+                        content_hash=content_hash,
+                        response_time=response_time
+                    )
+
+                finally:
+                    await context.close()
+                    await browser.close()
+
+        except Exception as e:
+            logger.error("County permit scraping failed", error=str(e), exc_info=True)
+            return ScrapingResult(
+                success=False,
+                error=str(e),
+                response_time=(datetime.utcnow() - start_time).total_seconds()
+            )
+
+    async def scrape_all_reports(
         self,
-        page: Page,
-        start_date: datetime,
-        end_date: datetime
-    ) -> Optional[str]:
-        """Perform permit search on the portal."""
-        try:
-            # Look for search form
-            search_form = await page.wait_for_selector(
-                self.config.search_form_selector or "form",
-                timeout=self.config.wait_timeout_ms
-            )
+        start_date: str,
+        end_date: str
+    ) -> Dict[str, ScrapingResult]:
+        """
+        Scrape all 3 report types for comprehensive permit intelligence.
 
-            if not search_form:
-                self.logger.error("Could not find search form")
-                return None
+        Returns:
+            Dictionary with keys: 'applied', 'issued', 'closed'
+        """
+        logger.info("Scraping all county report types...")
 
-            # Fill date fields if available
-            if self.config.date_from_selector:
-                date_from_input = await page.query_selector(self.config.date_from_selector)
-                if date_from_input:
-                    await date_from_input.fill(start_date.strftime("%m/%d/%Y"))
+        results = {}
 
-            if self.config.date_to_selector:
-                date_to_input = await page.query_selector(self.config.date_to_selector)
-                if date_to_input:
-                    await date_to_input.fill(end_date.strftime("%m/%d/%Y"))
+        # Scrape each report type
+        for report_type in CountyReportType:
+            logger.info(f"Scraping {report_type.name} report...")
+            result = await self.scrape_permits_data(start_date, end_date, report_type)
+            results[report_type.name.lower()] = result
 
-            # Submit search
-            search_button = await page.query_selector(
-                self.config.search_button_selector or "button[type='submit']"
-            )
+            # Small delay between reports to avoid rate limiting
+            await asyncio.sleep(2)
 
-            if search_button:
-                await search_button.click()
-            else:
-                # Try submitting the form directly
-                await search_form.evaluate("form => form.submit()")
+        total_permits = sum(
+            len(result.data) if result.success else 0
+            for result in results.values()
+        )
 
-            # Wait for results
-            await page.wait_for_load_state('networkidle')
-            await asyncio.sleep(self.config.page_load_delay_ms / 1000)
+        logger.info(
+            "All county reports scraped",
+            total_permits=total_permits,
+            applied=len(results['applied'].data) if results['applied'].success else 0,
+            issued=len(results['issued'].data) if results['issued'].success else 0,
+            closed=len(results['closed'].data) if results['closed'].success else 0
+        )
 
-            # Return page content for processing
-            return await page.content()
+        return results
 
-        except PatchrightTimeoutError as e:
-            self.logger.error(f"Timeout during permit search: {e}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Error performing permit search: {e}")
-            return None
-
-    async def _extract_permits_from_results(
+    async def scrape_all_reports_deduplicated(
         self,
-        page: Page,
-        results_html: str,
-        max_permits: int
-    ) -> List[CountyPermitRecord]:
-        """Extract permit records from search results."""
-        permits = []
+        start_date: str,
+        end_date: str
+    ) -> ScrapingResult:
+        """
+        Scrape all 3 report types and return deduplicated unique permits.
 
-        try:
-            soup = BeautifulSoup(results_html, 'html.parser')
+        Deduplication strategy:
+        - Permits can appear in multiple reports as they move through lifecycle
+        - Keep the record with most advanced status: Closed > Issued > Applied
+        - This gives the current status of each unique permit
 
-            # Find results table
-            results_table = soup.select_one(
-                self.config.results_table_selector or "table"
+        Returns:
+            Single ScrapingResult with deduplicated data
+        """
+        logger.info("Scraping all county reports with deduplication...")
+
+        # Scrape all reports
+        results = await self.scrape_all_reports(start_date, end_date)
+
+        # Combine all data
+        all_permits = []
+        for report_name, result in results.items():
+            if result.success:
+                all_permits.extend(result.data)
+
+        if not all_permits:
+            return ScrapingResult(
+                success=False,
+                data=[],
+                error="No permits found in any report",
+                response_time=0.0
             )
 
-            if not results_table:
-                self.logger.warning("Could not find results table")
-                return permits
+        # Convert to DataFrame for deduplication
+        df = pd.DataFrame(all_permits)
 
-            # Extract data from table rows
-            rows = results_table.select("tr")[1:]  # Skip header row
+        raw_count = len(df)
+        logger.info(f"Combined raw permits: {raw_count}")
 
-            for i, row in enumerate(rows[:max_permits]):
-                try:
-                    permit_data = await self._extract_permit_from_row(page, row, i)
-                    if permit_data:
-                        permits.append(permit_data)
+        # Add priority for deduplication (Closed > Issued > Applied)
+        status_priority = {'closed': 3, 'issued': 2, 'applied': 1}
+        df['_priority'] = df['report_type'].map(status_priority)
 
-                    # Rate limiting
-                    await asyncio.sleep(self.config.between_requests_delay_ms / 1000)
+        # Keep record with highest priority (most advanced status)
+        df_deduplicated = df.sort_values('_priority', ascending=False).drop_duplicates(
+            subset=['permit_number'],
+            keep='first'
+        )
 
-                except Exception as e:
-                    self.logger.warning(f"Failed to extract permit from row {i}: {e}")
-                    continue
+        # Remove priority column
+        df_deduplicated = df_deduplicated.drop(columns=['_priority'])
 
-        except Exception as e:
-            self.logger.error(f"Error extracting permits from results: {e}")
+        unique_count = len(df_deduplicated)
+        duplicates_removed = raw_count - unique_count
 
-        return permits
+        logger.info(
+            "Deduplication complete",
+            raw_count=raw_count,
+            unique_count=unique_count,
+            duplicates_removed=duplicates_removed
+        )
 
-    async def _extract_permit_from_row(
+        # Convert back to dict list
+        deduplicated_permits = df_deduplicated.to_dict('records')
+
+        return ScrapingResult(
+            success=True,
+            data=deduplicated_permits,
+            response_time=sum(r.response_time for r in results.values())
+        )
+
+    async def scrape_today(self, report_type: CountyReportType = CountyReportType.ISSUED) -> ScrapingResult:
+        """Convenience method to scrape today's permits."""
+        today = datetime.now().strftime("%m/%d/%Y")
+        return await self.scrape_permits_data(today, today, report_type)
+
+    async def scrape_date_range(
         self,
-        page: Page,
-        row,
-        row_index: int
-    ) -> Optional[CountyPermitRecord]:
-        """Extract permit data from a table row."""
-        try:
-            cells = row.select("td")
-            if len(cells) < 3:  # Ensure minimum data available
-                return None
+        days_back: int = 7,
+        report_type: CountyReportType = CountyReportType.ISSUED
+    ) -> ScrapingResult:
+        """Convenience method to scrape permits for the last N days."""
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days_back)
 
-            # Extract basic data from table cells (common patterns)
-            permit_number = self._extract_cell_text(cells, 0)
-            permit_type_text = self._extract_cell_text(cells, 1) if len(cells) > 1 else ""
-            status_text = self._extract_cell_text(cells, 2) if len(cells) > 2 else ""
-            project_description = self._extract_cell_text(cells, 3) if len(cells) > 3 else "No description"
-            project_address = self._extract_cell_text(cells, 4) if len(cells) > 4 else "No address"
-            applicant_name = self._extract_cell_text(cells, 5) if len(cells) > 5 else "Unknown"
-            date_text = self._extract_cell_text(cells, 6) if len(cells) > 6 else ""
+        return await self.scrape_permits_data(
+            start_date.strftime("%m/%d/%Y"),
+            end_date.strftime("%m/%d/%Y"),
+            report_type
+        )
 
-            # Try to parse application date
-            application_date = self._parse_date_from_text(date_text) or datetime.now()
+    async def run_continuous_monitoring(self) -> None:
+        """Run continuous monitoring for new county permits."""
+        logger.info("Starting continuous county permit monitoring...")
 
-            # Check for detail link and get additional data if available
-            detail_link = row.select_one(
-                self.config.permit_detail_link_selector or "a"
-            )
-
-            additional_data = {}
-            if detail_link and detail_link.get('href'):
-                additional_data = await self._scrape_permit_details(page, detail_link.get('href'))
-
-            # Create permit record
-            permit_data = {
-                'permit_number': permit_number or f"UNKNOWN_{row_index}",
-                'project_description': project_description,
-                'project_address': project_address,
-                'applicant_name': applicant_name,
-                'application_date': application_date,
-                'portal_url': self.config.portal_url,
-                **additional_data  # Merge additional data from detail page
-            }
-
-            # Create and classify permit
-            permit = CountyPermitRecord(**permit_data)
-            permit.permit_type = permit.classify_permit_type()
-            permit.status = permit.classify_status(status_text)
-
-            return permit
-
-        except Exception as e:
-            self.logger.debug(f"Failed to extract permit from row {row_index}: {e}")
-            return None
-
-    async def _scrape_permit_details(self, page: Page, detail_url: str) -> Dict[str, Any]:
-        """Scrape additional details from permit detail page."""
-        additional_data = {}
-
-        try:
-            # Navigate to detail page
-            full_url = urljoin(self.config.portal_url, detail_url)
-            await page.goto(full_url, timeout=self.config.wait_timeout_ms)
-
-            await asyncio.sleep(self.config.page_load_delay_ms / 1000)
-
-            # Extract additional fields using configured selectors
-            if self.config.field_selectors:
-                for field_name, selector in self.config.field_selectors.items():
-                    try:
-                        element = await page.query_selector(selector)
-                        if element:
-                            text = await element.text_content()
-                            if text and text.strip():
-                                additional_data[field_name] = text.strip()
-                    except Exception:
-                        continue
-
-            # Go back to main results
-            await page.go_back()
-            await asyncio.sleep(self.config.between_requests_delay_ms / 1000)
-
-        except Exception as e:
-            self.logger.debug(f"Failed to scrape permit details from {detail_url}: {e}")
-
-        return additional_data
-
-    def _extract_cell_text(self, cells, index: int) -> str:
-        """Extract text from table cell safely."""
-        if index < len(cells):
-            return cells[index].get_text().strip()
-        return ""
-
-    def _parse_date_from_text(self, date_text: str) -> Optional[datetime]:
-        """Parse date from various text formats."""
-        if not date_text or date_text.strip() == "":
-            return None
-
-        # Clean date text
-        date_text = date_text.strip()
-
-        # Try common date formats
-        formats = [
-            "%m/%d/%Y",
-            "%m-%d-%Y",
-            "%Y-%m-%d",
-            "%m/%d/%y",
-            "%B %d, %Y",
-            "%b %d, %Y"
-        ]
-
-        for fmt in formats:
+        while True:
             try:
-                return datetime.strptime(date_text, fmt)
-            except ValueError:
-                continue
+                # Scrape issued permits (most important for tracking active projects)
+                result = await self.scrape_today(CountyReportType.ISSUED)
 
-        return None
+                if result.success and result.data:
+                    # Check for changes
+                    has_changes = await self.change_detector.has_changes(result.content_hash)
 
-    async def process_response(self, content: bytes, response) -> Any:
-        """Process response - not used in Playwright scraper."""
-        return content.decode('utf-8', errors='ignore')
+                    if has_changes:
+                        logger.info("New county permits detected!", count=len(result.data))
+
+                        # Store in database if available
+                        if self.db_manager:
+                            await self._store_permits(result.data)
+
+                        # Update change detector
+                        await self.change_detector.update_hash(result.content_hash)
+                    else:
+                        logger.info("No new county permits since last check")
+                else:
+                    logger.warning("Failed to scrape county permits or no data found")
+
+                # Wait 2 hours before next check
+                await asyncio.sleep(2 * 60 * 60)
+
+            except Exception as e:
+                logger.error("Error in continuous monitoring", error=str(e))
+                await asyncio.sleep(60)  # Wait 1 minute before retry
+
+    async def _store_permits(self, permits: List[Dict[str, Any]]) -> None:
+        """Store permits in database."""
+        if not self.db_manager:
+            return
+
+        try:
+            logger.info("Storing county permits in database", count=len(permits))
+            # Implementation depends on database schema
+            # await self.db_manager.store_permits(permits)
+        except Exception as e:
+            logger.error("Failed to store county permits in database", error=str(e))
 
 
 async def create_county_permits_scraper(
     db_manager: DatabaseManager,
     change_detector: ChangeDetector,
-    redis_client,
-    portal_url: str,
-    portal_type: str = "generic",
-    **config_kwargs
+    download_dir: Optional[str] = None,
+    **kwargs
 ) -> CountyPermitsScraper:
     """Factory function to create configured county permits scraper."""
-
-    portal_config = PermitPortalConfig(
-        portal_url=portal_url,
-        portal_type=portal_type,
-        **config_kwargs
-    )
-
     scraper = CountyPermitsScraper(
+        download_dir=download_dir,
         db_manager=db_manager,
         change_detector=change_detector,
-        redis_client=redis_client,
-        portal_config=portal_config,
-        **config_kwargs
+        **kwargs
     )
-
-    await scraper.initialize()
     return scraper

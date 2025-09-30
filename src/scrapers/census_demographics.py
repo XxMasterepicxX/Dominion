@@ -1,18 +1,47 @@
 """
-US Census Demographics Scraper
+US Census Demographics Scraper - Complete Multi-Level Geographic Coverage
 
-Fetches demographic, economic, and housing data from the US Census Bureau API.
-Provides population, income, housing, and economic indicators for market analysis.
+Fetches comprehensive demographic, economic, and housing data from Census Bureau API
+for real estate intelligence and property investment analysis.
 
-Coverage: Population, housing units, income, demographics for Gainesville area
-Data Source: US Census Bureau American Community Survey (ACS)
-Update Frequency: Monthly (when new Census data released)
+GEOGRAPHIC LEVELS COLLECTED:
+├─ County (1): Alachua County market overview
+├─ Census Tracts (58): Neighborhoods - PRIMARY for comparisons
+├─ Block Groups (160): Street-level precision for property assignment
+├─ Places (5): Cities - Gainesville, Alachua, High Springs, Archer, etc.
+└─ ZIP Codes (10+): User-facing searches (32601, 32606, 32608, etc.)
+
+DATA COLLECTED (45 variables per geography):
+├─ Demographics (10): Population, age, gender, education, households
+├─ Economics (10): Income distribution, poverty, unemployment, labor force
+├─ Housing (19): Vacancy, rent burden, building age, values, unit types
+└─ Commute (6): Transportation modes, work from home, commute times
+
+DATA SOURCES:
+├─ ACS 5-Year (2023): Most comprehensive, available to block group level
+├─ ACS 1-Year (2024): Most current, county level only (65k+ population)
+└─ No API key required - Census API is free and open
+
+UPDATE SCHEDULE:
+├─ ACS 5-Year: Released December annually (covers 2019-2023, etc.)
+├─ ACS 1-Year: Released September annually (covers 2024, etc.)
+└─ Run scraper: September (for current data) + December (for comprehensive data)
+
+REAL ESTATE USE CASES:
+├─ Link properties to demographics via spatial join (block group/tract)
+├─ Compare neighborhoods for investment opportunities (tract analysis)
+├─ Detect gentrification patterns (income trends over time)
+├─ Assess rental market demand (age, household composition)
+├─ Calculate affordability metrics (income vs rent/values)
+├─ Target specific demographics (students, young professionals, families)
+└─ User-facing market reports by city or ZIP code
 """
 import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
+from urllib.parse import urlencode, quote
 
 import aiohttp
 from pydantic import BaseModel, Field, validator
@@ -83,43 +112,71 @@ class CensusBureauScraper(ResilientScraper):
 
     BASE_URL = "https://api.census.gov/data"
 
-    # Common variable groups for real estate analysis
+    # Comprehensive variable groups for real estate intelligence
+    # ALL USEFUL CENSUS DATA FOR NEIGHBORHOOD ANALYSIS
+
     DEMOGRAPHIC_VARIABLES = [
         "B01003_001E",  # Total population
-        "B25001_001E",  # Total housing units
-        "B25003_002E",  # Owner occupied housing
-        "B25003_003E",  # Renter occupied housing
-        "B19013_001E",  # Median household income
-        "B25077_001E",  # Median home value
-        "B08301_001E",  # Total commuters
-        "B08301_010E",  # Public transportation commuters
+        "B01002_001E",  # Median age
+        "B01001_002E",  # Male population
+        "B01001_026E",  # Female population
+        "B11001_001E",  # Total households
+        "B11001_003E",  # Family households (married couple)
+        "B11001_005E",  # Nonfamily households
         "B15003_022E",  # Bachelor's degree holders
-        "B01002_001E"   # Median age
+        "B15003_023E",  # Master's degree holders
+        "B15003_025E",  # Doctorate degree holders
     ]
 
     ECONOMIC_VARIABLES = [
-        "B08303_001E",  # Total travel time to work
-        "B19001_001E",  # Household income distribution
-        "B25064_001E",  # Median gross rent
-        "B25075_001E",  # Home value distribution
+        "B19013_001E",  # Median household income
+        "B19025_001E",  # Aggregate household income
+        "B19001_002E",  # Households earning <$10k
+        "B19001_013E",  # Households earning $100k-$124k
+        "B19001_014E",  # Households earning $125k-$149k
+        "B19001_017E",  # Households earning $200k+
+        "B17001_002E",  # Population below poverty level
+        "B23025_002E",  # Labor force
+        "B23025_005E",  # Unemployed
         "C24010_001E",  # Employment by occupation
-        "B23025_002E"   # Labor force
     ]
 
     HOUSING_VARIABLES = [
-        "B25024_001E",  # Units in structure
-        "B25034_001E",  # Year structure built
-        "B25040_001E",  # House heating fuel
-        "B25016_001E",  # Household size by tenure
+        "B25001_001E",  # Total housing units
         "B25002_002E",  # Occupied housing units
-        "B25002_003E"   # Vacant housing units
+        "B25002_003E",  # Vacant housing units
+        "B25004_001E",  # Vacancy status (for rent, for sale, etc)
+        "B25003_002E",  # Owner occupied units
+        "B25003_003E",  # Renter occupied units
+        "B25077_001E",  # Median home value (owner-occupied)
+        "B25064_001E",  # Median gross rent
+        "B25070_010E",  # Rent burden (paying 50%+ of income)
+        "B25035_001E",  # Median year structure built
+        "B25034_002E",  # Built 2020 or later
+        "B25034_010E",  # Built 1970-1979
+        "B25034_011E",  # Built 1939 or earlier
+        "B25024_002E",  # 1-unit detached
+        "B25024_003E",  # 1-unit attached
+        "B25024_007E",  # 5-9 unit buildings
+        "B25024_008E",  # 10-19 unit buildings
+        "B25024_009E",  # 20-49 unit buildings
+        "B25024_010E",  # 50+ unit buildings
+    ]
+
+    COMMUTE_VARIABLES = [
+        "B08301_001E",  # Total commuters
+        "B08301_010E",  # Public transportation commuters
+        "B08301_019E",  # Walked to work
+        "B08301_021E",  # Work from home
+        "B08303_001E",  # Total travel time to work
+        "B08303_013E",  # Commute 60+ minutes
     ]
 
     def __init__(
         self,
         db_manager: DatabaseManager,
         change_detector: ChangeDetector,
-        census_api_key: str,
+        census_api_key: Optional[str] = None,
         default_geography: Optional[Dict[str, str]] = None,
         **kwargs
     ):
@@ -130,7 +187,7 @@ class CensusBureauScraper(ResilientScraper):
         )
         self.db_manager = db_manager
         self.change_detector = change_detector
-        self.api_key = census_api_key
+        self.api_key = census_api_key  # Optional - Census API is free and open
         self.default_geography = default_geography or {"state": "12", "county": "001"}  # Alachua County, FL as default
 
     async def scrape_demographics(
@@ -162,19 +219,25 @@ class CensusBureauScraper(ResilientScraper):
     async def scrape_area_profile(
         self,
         geography_filter: Dict[str, str],
-        year: int = 2022,
+        year: Optional[int] = None,
         include_housing: bool = True,
-        include_economics: bool = True
+        include_economics: bool = True,
+        include_commute: bool = True
     ) -> List[CensusDataPoint]:
         """
         Create comprehensive demographic profile for a geographic area.
 
         Args:
             geography_filter: Geographic identifiers (e.g., {"state": "12", "county": "001"})
-            year: Data year to retrieve
+            year: Data year to retrieve (None = auto-detect current year)
             include_housing: Include housing-related variables
             include_economics: Include economic variables
+            include_commute: Include commute-related variables
         """
+        # Auto-detect year if not provided
+        if year is None:
+            year = DEFAULT_ACS5_YEAR
+
         requests = []
 
         # Base demographics (always included)
@@ -209,7 +272,279 @@ class CensusBureauScraper(ResilientScraper):
                 dataset_name="economic_indicators"
             ))
 
+        # Commute data
+        if include_commute:
+            requests.append(CensusDataRequest(
+                api_type=CensusAPI.ACS5,
+                year=year,
+                variables=self.COMMUTE_VARIABLES,
+                geography_level=self._determine_geography_level(geography_filter),
+                geography_filter=geography_filter,
+                dataset_name="commute_patterns"
+            ))
+
         return await self.scrape_demographics(requests)
+
+    async def scrape_all_county_tracts(
+        self,
+        state: str = "12",
+        county: str = "001",
+        year: Optional[int] = None
+    ) -> List[CensusDataPoint]:
+        """
+        Scrape ALL census tracts in a county for detailed neighborhood analysis.
+
+        Tracts represent neighborhoods (~4,000 people). PRIMARY geographic level
+        for comparing neighborhoods and detecting investment opportunities.
+
+        Args:
+            state: State FIPS code (default: "12" = Florida)
+            county: County FIPS code (default: "001" = Alachua)
+            year: Data year (None = auto-detect current ACS 5-Year)
+
+        Returns:
+            List of CensusDataPoint objects, one for each tract (58 for Alachua)
+        """
+        # Auto-detect year if not provided
+        if year is None:
+            year = DEFAULT_ACS5_YEAR
+
+        self.logger.info(f"Scraping all census tracts for state={state}, county={county}, year={year}")
+
+        all_variables = (
+            self.DEMOGRAPHIC_VARIABLES +
+            self.ECONOMIC_VARIABLES +
+            self.HOUSING_VARIABLES +
+            self.COMMUTE_VARIABLES
+        )
+
+        request = CensusDataRequest(
+            api_type=CensusAPI.ACS5,
+            year=year,
+            variables=all_variables,
+            geography_level=GeographyLevel.TRACT,
+            geography_filter={"state": state, "county": county},
+            dataset_name="all_county_tracts"
+        )
+
+        data_points = await self._execute_census_request(request)
+        self.logger.info(f"Retrieved data for {len(data_points)} census tracts")
+
+        return data_points
+
+    async def scrape_all_block_groups(
+        self,
+        state: str = "12",
+        county: str = "001",
+        year: Optional[int] = None
+    ) -> List[CensusDataPoint]:
+        """
+        Scrape ALL block groups in a county for street-level demographic detail.
+
+        Block groups are subdivisions of tracts (~600-3,000 people). Use for
+        PRECISE property-level demographic assignment when you need street-by-street
+        granularity. Higher margin of error than tracts due to smaller sample sizes.
+
+        Args:
+            state: State FIPS code (default: "12" = Florida)
+            county: County FIPS code (default: "001" = Alachua)
+            year: Data year (default: 2023 for ACS 5-Year)
+
+        Returns:
+            List of CensusDataPoint objects, one for each block group (160 for Alachua)
+        """
+
+        # Auto-detect year if not provided
+        if year is None:
+            year = DEFAULT_ACS5_YEAR
+
+        self.logger.info(f"Scraping all block groups for state={state}, county={county}, year={year}")
+
+        all_variables = (
+            self.DEMOGRAPHIC_VARIABLES +
+            self.ECONOMIC_VARIABLES +
+            self.HOUSING_VARIABLES +
+            self.COMMUTE_VARIABLES
+        )
+
+        request = CensusDataRequest(
+            api_type=CensusAPI.ACS5,
+            year=year,
+            variables=all_variables,
+            geography_level=GeographyLevel.BLOCK_GROUP,
+            geography_filter={"state": state, "county": county},
+            dataset_name="all_county_block_groups"
+        )
+
+        data_points = await self._execute_census_request(request)
+        self.logger.info(f"Retrieved data for {len(data_points)} block groups")
+
+        return data_points
+
+    async def scrape_all_places(
+        self,
+        state: str = "12",
+        year: Optional[int] = None
+    ) -> List[CensusDataPoint]:
+        """
+        Scrape ALL incorporated places (cities/towns) in a state.
+
+        Places represent municipalities (cities, towns). Use for CITY-LEVEL comparisons
+        like Gainesville vs Alachua vs High Springs.
+
+        Args:
+            state: State FIPS code (default: "12" = Florida)
+            year: Data year (default: 2023 for ACS 5-Year)
+
+        Returns:
+            List of CensusDataPoint objects, one for each place/city
+        """
+
+        # Auto-detect year if not provided
+        if year is None:
+            year = DEFAULT_ACS5_YEAR
+
+        self.logger.info(f"Scraping all places for state={state}, year={year}")
+
+        all_variables = (
+            self.DEMOGRAPHIC_VARIABLES +
+            self.ECONOMIC_VARIABLES +
+            self.HOUSING_VARIABLES +
+            self.COMMUTE_VARIABLES
+        )
+
+        request = CensusDataRequest(
+            api_type=CensusAPI.ACS5,
+            year=year,
+            variables=all_variables,
+            geography_level=GeographyLevel.PLACE,
+            geography_filter={"state": state},
+            dataset_name="all_state_places"
+        )
+
+        data_points = await self._execute_census_request(request)
+        self.logger.info(f"Retrieved data for {len(data_points)} places")
+
+        return data_points
+
+    async def get_zip_codes_for_county(
+        self,
+        state: str = "12",
+        county: str = "001"
+    ) -> List[str]:
+        """
+        Get all ZIP codes (ZCTAs) for a specific county.
+
+        Downloads Census Bureau's ZCTA-to-County relationship file and extracts
+        ZIP codes that intersect with the specified county. This allows DYNAMIC
+        ZIP code discovery for ANY county instead of hardcoding them.
+
+        Args:
+            state: State FIPS code (default: "12" = Florida)
+            county: County FIPS code (default: "001" = Alachua)
+
+        Returns:
+            List of ZIP codes (as strings) for the county
+        """
+        county_fips = f"{state}{county}"  # e.g., "12001" for Alachua
+        self.logger.info(f"Fetching ZIP codes for county FIPS: {county_fips}")
+
+        try:
+            # Download relationship file
+            result = await self.scrape(ZCTA_COUNTY_RELATIONSHIP_URL)
+
+            if not result.success:
+                self.logger.error(f"Failed to download ZCTA relationship file: {result.error}")
+                return []
+
+            # Parse pipe-delimited file
+            # Format: OID_ZCTA5_20|GEOID_ZCTA5_20|...|GEOID_COUNTY_20|...
+            # Column 2 = ZIP code, Column 10 = County FIPS
+            content = result.data.decode('utf-8')
+            lines = content.strip().split('\n')
+
+            zip_codes = set()
+            for line in lines[1:]:  # Skip header
+                fields = line.split('|')
+                if len(fields) >= 10:
+                    zcta = fields[1]  # ZIP code
+                    county_id = fields[9]  # County FIPS
+
+                    if county_id == county_fips and zcta:
+                        zip_codes.add(zcta)
+
+            zip_list = sorted(list(zip_codes))
+            self.logger.info(f"Found {len(zip_list)} ZIP codes for county {county_fips}")
+
+            return zip_list
+
+        except Exception as e:
+            self.logger.error(f"Error fetching ZIP codes for county: {e}")
+            return []
+
+    async def scrape_zip_codes(
+        self,
+        zip_codes: Optional[List[str]] = None,
+        state: str = "12",
+        county: str = "001",
+        year: Optional[int] = None
+    ) -> List[CensusDataPoint]:
+        """
+        Scrape ZIP Code Tabulation Areas (ZCTAs).
+
+        If zip_codes not provided, automatically fetches ALL ZIPs for the county.
+        This makes it work for ANY county (Gainesville, Tampa, Miami, Orlando, etc.)
+        without hardcoding ZIP codes.
+
+        ZCTAs approximate ZIP codes. Use for USER-FACING searches since people
+        think in ZIP codes. Note: ZCTAs cross tract boundaries so they don't
+        align perfectly with neighborhoods.
+
+        Args:
+            zip_codes: List of specific ZIP codes to query (optional)
+            state: State FIPS code (default: "12" = Florida)
+            county: County FIPS code (default: "001" = Alachua)
+            year: Data year (default: 2023 for ACS 5-Year)
+
+        Returns:
+            List of CensusDataPoint objects, one for each ZIP code
+        """
+
+        # If no ZIP codes provided, get all ZIPs for county
+        if zip_codes is None:
+            self.logger.info(f"No ZIP codes provided, fetching all for county {state}{county}")
+            zip_codes = await self.get_zip_codes_for_county(state, county)
+
+            if not zip_codes:
+                self.logger.warning("No ZIP codes found for county")
+                return []
+
+        # Auto-detect year if not provided
+        if year is None:
+            year = DEFAULT_ACS5_YEAR
+
+        self.logger.info(f"Scraping {len(zip_codes)} ZIP codes, year={year}")
+
+        all_variables = (
+            self.DEMOGRAPHIC_VARIABLES +
+            self.ECONOMIC_VARIABLES +
+            self.HOUSING_VARIABLES +
+            self.COMMUTE_VARIABLES
+        )
+
+        request = CensusDataRequest(
+            api_type=CensusAPI.ACS5,
+            year=year,
+            variables=all_variables,
+            geography_level=GeographyLevel.ZIP,
+            geography_filter={"zip code tabulation area": ",".join(zip_codes)},
+            dataset_name="zip_codes"
+        )
+
+        data_points = await self._execute_census_request(request)
+        self.logger.info(f"Retrieved data for {len(data_points)} ZIP codes")
+
+        return data_points
 
     async def scrape_time_series(
         self,
@@ -430,30 +765,40 @@ class CensusBureauScraper(ResilientScraper):
 
         # Build query parameters
         params = {
-            "get": ",".join(request.variables + ["NAME"]),
-            "key": self.api_key
+            "get": ",".join(request.variables + ["NAME"])
         }
+
+        # Only add API key if provided (Census API doesn't require it)
+        if self.api_key:
+            params["key"] = self.api_key
 
         # Add geography
         if request.geography_filter:
-            for_clause = f"for={request.geography_level.value}:*"
             in_clause_parts = []
 
             for geo_level, geo_code in request.geography_filter.items():
                 if geo_level != request.geography_level.value:
-                    in_clause_parts.append(f"{geo_level}:{geo_code}")
+                    in_clause_parts.append(f"in={geo_level}:{geo_code}")
 
             if in_clause_parts:
-                params["for"] = for_clause
-                params["in"] = ",".join(in_clause_parts)
+                params["for"] = f"{request.geography_level.value}:*"
+                # Don't include 'in' in params dict, add it separately to avoid encoding issues
             else:
+                # Geography level matches filter - requesting specific geographies
                 params["for"] = f"{request.geography_level.value}:{request.geography_filter[request.geography_level.value]}"
         else:
             params["for"] = f"{request.geography_level.value}:*"
 
-        # Build query string
-        query_params = "&".join(f"{k}={v}" for k, v in params.items())
-        return f"{base}?{query_params}"
+        # Use urlencode for proper URL encoding of all parameters
+        query_string = urlencode(params, safe=':,*')
+
+        # Add 'in' clauses separately (they can appear multiple times)
+        if request.geography_filter:
+            for geo_level, geo_code in request.geography_filter.items():
+                if geo_level != request.geography_level.value:
+                    query_string += f"&in={quote(geo_level, safe='')}:{geo_code}"
+
+        return f"{base}?{query_string}"
 
     def _parse_census_response(self, api_data: List[Dict], request: CensusDataRequest) -> List[CensusDataPoint]:
         """Parse Census API response into CensusDataPoint objects."""
@@ -525,21 +870,91 @@ class CensusBureauScraper(ResilientScraper):
             return GeographyLevel.COUNTY  # Default fallback
 
 
+# Default configuration for Alachua County, Florida
+DEFAULT_GEOGRAPHY = {
+    "state": "12",    # Florida
+    "county": "001"   # Alachua County
+}
+
+# Census Bureau ZCTA to County relationship file (2020)
+ZCTA_COUNTY_RELATIONSHIP_URL = "https://www2.census.gov/geo/docs/maps-data/data/rel2020/zcta520/tab20_zcta520_county20_natl.txt"
+
+# County FIPS codes for common areas (for quick reference)
+COUNTY_FIPS = {
+    "alachua_fl": "12001",      # Gainesville area
+    "hillsborough_fl": "12057",  # Tampa area
+    "miami_dade_fl": "12086",    # Miami area
+    "orange_fl": "12095",        # Orlando area
+    "duval_fl": "12031",         # Jacksonville area
+}
+
+# Auto-calculate current Census data years
+# ACS 1-Year: Released in September, covers previous year (Sept 2025 = 2024 data)
+# ACS 5-Year: Released in December, covers 5-year period ending 2 years ago (Dec 2025 = 2019-2023)
+def get_current_acs_years():
+    """
+    Automatically determine most recent available Census data years.
+
+    ACS 1-Year: Released September of year Y with data from year Y-1
+                (e.g., September 2025 releases 2024 data)
+    ACS 5-Year: Released December of year Y with data from (Y-6) to (Y-2)
+                (e.g., December 2025 releases 2019-2023 data)
+
+    Returns: (acs1_year, acs5_year)
+    """
+    from datetime import datetime
+    now = datetime.now()
+    current_year = now.year
+    current_month = now.month
+
+    # ACS 1-Year: Available after September, covers previous year
+    if current_month >= 9:
+        acs1_year = current_year - 1  # Sept 2025+ uses 2024 data
+    else:
+        acs1_year = current_year - 2  # Before Sept 2025 uses 2023 data
+
+    # ACS 5-Year: Available after December, ends 2 years prior
+    if current_month >= 12:
+        acs5_year = current_year - 2  # Dec 2025+ uses 2023 data (2019-2023)
+    else:
+        acs5_year = current_year - 3  # Before Dec 2025 uses 2022 data (2018-2022)
+
+    return acs1_year, acs5_year
+
+# Get current years automatically
+DEFAULT_CENSUS_YEAR, DEFAULT_ACS5_YEAR = get_current_acs_years()
+
+# For debugging/logging
+import logging
+_logger = logging.getLogger(__name__)
+_logger.info(f"Auto-detected Census data years: ACS 1-Year={DEFAULT_CENSUS_YEAR}, ACS 5-Year={DEFAULT_ACS5_YEAR}")
+
+
 async def create_census_scraper(
     db_manager: DatabaseManager,
     change_detector: ChangeDetector,
     redis_client,
-    census_api_key: str,
+    census_api_key: Optional[str] = None,
     default_geography: Optional[Dict[str, str]] = None,
     **kwargs
 ) -> CensusBureauScraper:
-    """Factory function to create configured Census Bureau scraper."""
+    """
+    Factory function to create configured Census Bureau scraper.
+
+    Args:
+        db_manager: Database connection manager
+        change_detector: Change detection system
+        redis_client: Redis client for caching/rate limiting
+        census_api_key: Optional Census API key (not required - API is free)
+        default_geography: Default geographic area (defaults to Alachua County, FL)
+        **kwargs: Additional arguments passed to ResilientScraper
+    """
     scraper = CensusBureauScraper(
         db_manager=db_manager,
         change_detector=change_detector,
         redis_client=redis_client,
         census_api_key=census_api_key,
-        default_geography=default_geography,
+        default_geography=default_geography or DEFAULT_GEOGRAPHY,
         **kwargs
     )
     await scraper.initialize()

@@ -772,3 +772,13 @@ async def create_gis_downloader(
 
     await scraper.initialize()
     return scraper
+
+
+# Default shapefile URLs for Alachua County
+DEFAULT_SHAPEFILE_URLS = {
+    "alachua_county_parcels": "https://s3.amazonaws.com/maps.acpafl.org/GIS/publicparcels.zip"
+}
+
+DEFAULT_SHAPEFILE_TYPES = {
+    "alachua_county_parcels": ShapefileType.PROPERTY_PARCELS
+}

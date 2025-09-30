@@ -9,7 +9,11 @@
       "Bash(python:*)",
       "Bash(python3:*)",
       "Bash(source:*)",
-      "Bash(venv312/Scripts/python.exe:*)"
+      "Bash(venv312/Scripts/python.exe:*)",
+      "Read(//tmp/**)",
+      "Bash(unzip:*)",
+      "Bash(pip install:*)",
+      "Bash(venv312/Scripts/pip.exe install aiofiles geopandas shapely pyproj)"
     ],
     "deny": [],
     "ask": []

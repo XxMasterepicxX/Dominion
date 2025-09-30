@@ -93,5 +93,4 @@ temp/
 *.tmp
 *.temp
 
-# Claude Code specific
 .claude/
