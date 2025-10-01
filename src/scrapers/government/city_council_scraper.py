@@ -13,12 +13,17 @@ import sys
 import requests
 import tempfile
 import re
+import urllib3
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 import structlog
 
 from ...config.schemas import MarketConfig
+
+# Suppress InsecureRequestWarning when SSL verification is disabled
+# This is intentional for self-signed certs on some government portals
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
     import PyPDF2
@@ -72,8 +77,14 @@ logger = structlog.get_logger(__name__)
 class CouncilScraper:
     """City council scraper with meeting data extraction using platform-specific methods."""
 
-    def __init__(self, market_config: MarketConfig):
-        """Initialize with market config."""
+    def __init__(self, market_config: MarketConfig, verify_ssl: bool = False):
+        """
+        Initialize with market config.
+
+        Args:
+            market_config: Market configuration
+            verify_ssl: Enable SSL verification (default False for self-signed certs on gov portals)
+        """
         self.config = market_config
         self.council_config = market_config.scrapers.council
 
@@ -82,6 +93,7 @@ class CouncilScraper:
 
         self.platform = self.council_config.platform.lower()
         self.endpoint = self.council_config.endpoint
+        self.verify_ssl = verify_ssl
 
         self.session = requests.Session()
         self.session.headers.update({
@@ -91,9 +103,15 @@ class CouncilScraper:
             'Accept': 'application/json, text/javascript, */*; q=0.01'
         })
 
+        if not verify_ssl:
+            logger.warning("ssl_verification_disabled",
+                         market=self.config.market.name,
+                         reason="self_signed_cert_on_gov_portal")
+
         logger.info("council_scraper_initialized",
                    market=self.config.market.name,
-                   platform=self.platform)
+                   platform=self.platform,
+                   ssl_verify=verify_ssl)
 
     def fetch_recent_meetings(self, months_back: int = 3) -> List[MeetingRecord]:
         """
@@ -139,7 +157,7 @@ class CouncilScraper:
                 json=payload,
                 headers=self.session.headers,
                 timeout=30,
-                verify=False
+                verify=self.verify_ssl
             )
 
             if response.status_code != 200:
@@ -264,19 +282,21 @@ class CouncilScraper:
             logger.warning("pypdf2_not_installed")
             return
 
+        temp_file_path = None
         try:
             url = meeting.agenda_url if doc_type == 'agenda' else meeting.minutes_url
             if not url:
                 return
 
-            response = self.session.get(url, timeout=60, verify=False)
+            response = self.session.get(url, timeout=60, verify=self.verify_ssl)
             response.raise_for_status()
 
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+            temp_file_path = temp_file.name
             temp_file.write(response.content)
             temp_file.close()
 
-            with open(temp_file.name, 'rb') as pdf_file:
+            with open(temp_file_path, 'rb') as pdf_file:
                 pdf_reader = PyPDF2.PdfReader(pdf_file)
                 text_parts = []
 
@@ -291,10 +311,16 @@ class CouncilScraper:
                            doc_type=doc_type,
                            chars_extracted=len(extracted_text))
 
-            Path(temp_file.name).unlink()
-
         except Exception as e:
             logger.warning("pdf_extraction_failed", doc_type=doc_type, error=str(e))
+
+        finally:
+            # Always cleanup temp file, even on error
+            if temp_file_path and Path(temp_file_path).exists():
+                try:
+                    Path(temp_file_path).unlink()
+                except Exception as cleanup_error:
+                    logger.warning("temp_file_cleanup_failed", path=temp_file_path, error=str(cleanup_error))
 
     def _fetch_legistar_meetings(self, months_back: int) -> List[MeetingRecord]:
         """Fetch meetings from Legistar (HTML scraping)."""

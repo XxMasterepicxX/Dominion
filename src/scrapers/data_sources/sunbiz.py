@@ -10,6 +10,7 @@ Data sources:
 
 Output: Cleaned, normalized records ready for database upload.
 """
+import os
 import paramiko
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -27,10 +28,8 @@ class SunbizScraper:
     Filters for real estate-relevant entities.
     """
 
-    # SFTP Configuration
+    # SFTP Configuration (defaults for public access)
     SFTP_HOST = "sftp.floridados.gov"
-    SFTP_USERNAME = "Public"
-    SFTP_PASSWORD = "PubAccess1845!"
     CORPORATE_PATH = "/Public/doc/cor/"
     EVENTS_PATH = "/Public/doc/cor/Events/"
 
@@ -60,15 +59,21 @@ class SunbizScraper:
         'REVOK': 'revocation',
     }
 
-    def __init__(self, download_dir: Optional[Path] = None):
+    def __init__(self, download_dir: Optional[Path] = None, sftp_username: Optional[str] = None, sftp_password: Optional[str] = None):
         """
         Initialize Sunbiz scraper.
 
         Args:
             download_dir: Directory for downloaded files (default: ./data/sunbiz)
+            sftp_username: SFTP username (default: from env SUNBIZ_SFTP_USER or 'Public')
+            sftp_password: SFTP password (default: from env SUNBIZ_SFTP_PASS or public credentials)
         """
         self.download_dir = download_dir or Path("./data/sunbiz")
         self.download_dir.mkdir(parents=True, exist_ok=True)
+
+        # Get credentials from env vars with fallback to public access
+        self.sftp_username = sftp_username or os.getenv('SUNBIZ_SFTP_USER', 'Public')
+        self.sftp_password = sftp_password or os.getenv('SUNBIZ_SFTP_PASS', 'PubAccess1845!')
 
     def _connect_sftp(self) -> Tuple[paramiko.SSHClient, paramiko.SFTPClient]:
         """Establish SFTP connection."""
@@ -78,8 +83,8 @@ class SunbizScraper:
 
             ssh.connect(
                 hostname=self.SFTP_HOST,
-                username=self.SFTP_USERNAME,
-                password=self.SFTP_PASSWORD,
+                username=self.sftp_username,
+                password=self.sftp_password,
                 look_for_keys=False,
                 allow_agent=False,
                 timeout=30
@@ -261,8 +266,9 @@ class SunbizScraper:
 
                     if 1 <= month <= 12 and 1 <= day <= 31 and 2020 <= year <= 2030:
                         return datetime(year, month, day)
-                except:
-                    pass
+                except (ValueError, IndexError):
+                    # Invalid date format or out of range
+                    continue
         return None
 
     def _classify_entity_type(self, name: str, full_record: str) -> str:

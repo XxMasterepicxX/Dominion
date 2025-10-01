@@ -197,22 +197,22 @@ class CityPermitsScraper:
                     human_checkbox = await page.wait_for_selector("#noparam-checkbox", timeout=5000)
                     if not await human_checkbox.is_checked():
                         await human_checkbox.check()
-                except:
-                    pass
+                except (PlaywrightTimeout, Exception) as e:
+                    logger.debug("human_checkbox_not_found", error=str(e))
 
                 if token:
                     try:
                         await page.evaluate(f"document.querySelector('input[name=\"g-recaptcha-response\"]').value = '{token}';")
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug("recaptcha_injection_failed", error=str(e))
 
                 try:
                     submit_link = await page.wait_for_selector("#submitLink", timeout=5000)
                     await submit_link.click()
-                except:
+                except (PlaywrightTimeout, Exception):
                     try:
                         await page.evaluate("runQuery();")
-                    except:
+                    except Exception:
                         await form.evaluate("form => form.submit()")
 
                 await page.wait_for_load_state("networkidle")
@@ -240,14 +240,40 @@ class CityPermitsScraper:
 
                     try:
                         import pandas as pd
-                        df = pd.read_excel(str(excel_path))
 
-                        for _, row in df.iterrows():
-                            permit = PermitRecord(row.to_dict())
-                            permits.append(permit)
+                        # Add timeout for Excel parsing (30 seconds max)
+                        import signal
+                        from contextlib import contextmanager
 
-                        logger.info("excel_parsed", permits_count=len(permits))
+                        @contextmanager
+                        def timeout_context(seconds):
+                            def timeout_handler(signum, frame):
+                                raise TimeoutError(f"Excel parsing exceeded {seconds} seconds")
 
+                            # Set alarm (Unix only)
+                            if hasattr(signal, 'SIGALRM'):
+                                old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+                                signal.alarm(seconds)
+                                try:
+                                    yield
+                                finally:
+                                    signal.alarm(0)
+                                    signal.signal(signal.SIGALRM, old_handler)
+                            else:
+                                # Windows fallback - no timeout
+                                yield
+
+                        with timeout_context(30):
+                            df = pd.read_excel(str(excel_path))
+
+                            for _, row in df.iterrows():
+                                permit = PermitRecord(row.to_dict())
+                                permits.append(permit)
+
+                            logger.info("excel_parsed", permits_count=len(permits))
+
+                    except TimeoutError as e:
+                        logger.error("excel_parsing_timeout", error=str(e), file=excel_path.name)
                     except Exception as e:
                         logger.error("excel_parsing_failed", error=str(e))
 
