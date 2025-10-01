@@ -4,7 +4,7 @@ Change detection system using MD5 hashing for tracking content updates.
 import asyncio
 import hashlib
 import json
-import logging
+import structlog
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -14,6 +14,8 @@ import aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...database.connection import DatabaseManager
+
+logger = structlog.get_logger(__name__)
 
 
 class ChangeType(Enum):
@@ -61,7 +63,6 @@ class ChangeDetector:
         self.db_manager = db_manager
         self.redis = redis_client
         self.retention_days = retention_days
-        self.logger = logging.getLogger("change_detector")
 
     async def track_content_change(
         self,
@@ -142,10 +143,10 @@ class ChangeDetector:
 
         # Log significant changes
         if change_type != ChangeType.UNCHANGED:
-            self.logger.info(
-                f"Content change detected: {url} - {change_type.value} "
-                f"(size: {size_change:+d} bytes)"
-            )
+            logger.info("content_change_detected",
+                       url=url,
+                       change_type=change_type.value,
+                       size_change=size_change)
 
         return result
 
@@ -214,7 +215,7 @@ class ChangeDetector:
             return list(set(urls))  # Remove duplicates
 
         except Exception as e:
-            self.logger.warning(f"Redis lookup failed, falling back to database: {e}")
+            logger.warning("redis_lookup_failed", error=str(e))
             return await self._get_recent_changes_from_db(cutoff_date, change_types)
 
     async def bulk_check_changes(
@@ -239,7 +240,7 @@ class ChangeDetector:
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 url = url_content_pairs[i][0]
-                self.logger.error(f"Change detection failed for {url}: {result}")
+                logger.error("change_detection_failed", url=url, error=str(result))
             else:
                 valid_results.append(result)
 
@@ -258,7 +259,7 @@ class ChangeDetector:
             deleted_count = result.rowcount
             await session.commit()
 
-            self.logger.info(f"Cleaned up {deleted_count} old snapshots")
+            logger.info("snapshots_cleanup_completed", deleted_count=deleted_count)
             return deleted_count
 
     async def get_change_statistics(self, days: int = 30) -> Dict[str, Any]:
@@ -340,7 +341,7 @@ class ChangeDetector:
                     response_code=data.get('response_code')
                 )
         except Exception as e:
-            self.logger.warning(f"Redis cache lookup failed: {e}")
+            logger.warning("redis_cache_lookup_failed", error=str(e))
 
         # Fall back to database
         async with self.db_manager.get_session() as session:
@@ -442,7 +443,7 @@ class ChangeDetector:
 
             await self.redis.setex(cache_key, 86400, json.dumps(cache_data))
         except Exception as e:
-            self.logger.warning(f"Failed to cache snapshot: {e}")
+            logger.warning("snapshot_cache_failed", error=str(e))
 
     async def _get_first_seen(self, url: str) -> Optional[datetime]:
         """Get first seen timestamp for a URL."""

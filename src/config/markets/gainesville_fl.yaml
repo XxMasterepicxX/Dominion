@@ -1,0 +1,104 @@
+# Gainesville, Florida Market Configuration
+# Test market #1 - our current working city
+
+market:
+  name: "Gainesville, FL"
+  state: "FL"
+  county: "Alachua"
+  timezone: "America/New_York"
+
+geography:
+  fips:
+    state: "12"    # Florida
+    county: "001"  # Alachua County
+
+scrapers:
+  # Census scraper - highly portable
+  census:
+    enabled: true
+    api_key: null  # Census API is free, no key needed
+
+  # Sunbiz scraper - Florida-wide, works everywhere in FL
+  sunbiz:
+    enabled: true
+
+  # Crime data scraper - Gainesville uses Socrata
+  crime:
+    enabled: true
+    platform: "socrata"
+    endpoint: "https://data.cityofgainesville.org/resource/gvua-xt9q"
+
+  # News RSS scraper - ACTUAL feeds from src/scrapers/news_rss_extractor.py
+  news:
+    enabled: true
+    feeds:
+      wuft_news: "https://www.wuft.org/news/feed/"
+      alachua_chronicle: "https://alachuachronicle.com/feed/"
+      mainstreet_daily: "https://mainstreetdailynews.com/feed/"
+    # HTML scraping sources (not RSS):
+    html_sources:
+      gainesville_sun: "https://www.gainesville.com/news/"
+      the_alligator: "https://alligator.org/section/news/"
+
+  # City Council scraper - Gainesville uses eScribe (migrated from Legistar 2020)
+  council:
+    enabled: true
+    platform: "escribe"
+    endpoint: "https://pub-cityofgainesville.escribemeetings.com"
+
+  # Property Appraiser (CAMA) scraper - Alachua County
+  property:
+    enabled: true
+    portal_base_url: "https://www.acpafl.org"
+    portal_type: "qpublic"
+    county_code: "ALA"
+    download_url_pattern: "https://s3.amazonaws.com/acpa.cama/ACPA_CAMAData.zip"
+
+  # City Permits scraper - Gainesville uses CitizenServe
+  city_permits:
+    enabled: true
+    platform: "citizenserve"
+    base_url: "https://www4.citizenserve.com"
+    jurisdiction: "Gainesville"
+    installation_id: "308"  # Gainesville's CitizenServe installation ID
+
+  # County Permits scraper - Alachua County uses CitizenServe
+  county_permits:
+    enabled: true
+    platform: "citizenserve"
+    base_url: "https://www6.citizenserve.com"  # County uses www6, not www4
+    jurisdiction: "Alachua County"
+    installation_id: "318"  # Alachua County's CitizenServe installation ID
+
+  # GIS Shapefile scraper - Alachua County GIS data
+  # Downloads ZIP files containing shapefiles (NOT GeoJSON)
+  gis:
+    enabled: true
+    county_name: "Alachua"
+    shapefile_urls:
+      parcels: "https://s3.amazonaws.com/maps.acpafl.org/GIS/publicparcels.zip"
+
+  # Business Journal scraper - ACTUAL sources from business_journal_scraper.py
+  business:
+    enabled: true
+    feeds:
+      florida_realtors: "https://www.floridarealtors.org/news-media/rss.xml"
+    # Florida Trend web scraping - checks Mondays, scrapes ALL found articles
+    florida_trend:
+      enabled: true
+      url_patterns:
+        - "https://www.floridatrend.com/realestate/{date}/florida-trend-real-estate/"
+        - "https://www.floridatrend.com/realestate/{date}/florida-real-estate/"
+      # Note: Scraper runs 24/7, gets ALL articles from available weeks
+
+# Notes - All configs verified against actual src/ scraper code (Oct 1, 2025):
+# - Census: api.census.gov/data (100% portable)
+# - Sunbiz: SFTP Florida state-wide (works everywhere in FL)
+# - Crime: Socrata open data platform (city-specific endpoint)
+# - News: LOCAL news RSS + HTML scraping (Gainesville/Alachua specific)
+# - Business: Florida Realtors RSS + Florida Trend web scraping (state-wide)
+# - Council: eScribe platform with AJAX endpoints (city-specific)
+# - Property: S3 direct download CAMA ZIP (county-specific)
+# - City Permits: CitizenServe www4, installation_id 308 (city-specific)
+# - County Permits: CitizenServe www6, installation_id 318 (county-specific)
+# - GIS: S3 shapefile ZIP download (county-specific)

@@ -4,7 +4,7 @@ Resilient scraper base class with proxy rotation, rate limiting, and circuit bre
 import asyncio
 import hashlib
 import json
-import logging
+import structlog
 import random
 import time
 from abc import ABC, abstractmethod
@@ -17,6 +17,8 @@ import aiohttp
 import aioredis
 from patchright.async_api import async_playwright, Page, Browser
 from fake_useragent import UserAgent
+
+logger = structlog.get_logger(__name__)
 
 
 class ScraperType(Enum):
@@ -313,9 +315,6 @@ class ResilientScraper(ABC):
         self.browser: Optional[Browser] = None
         self.user_agent = UserAgent()
 
-        # Logging
-        self.logger = logging.getLogger(f"scraper.{scraper_id}")
-
     async def __aenter__(self):
         """Async context manager entry."""
         await self.initialize()
@@ -363,7 +362,7 @@ class ResilientScraper(ABC):
 
         except Exception as e:
             self.rate_limiter.on_failure()
-            self.logger.error(f"Scraping failed for {url}: {e}")
+            logger.error("scraping_failed", url=url, scraper_id=self.scraper_id, error=str(e))
             return ScrapingResult(
                 success=False,
                 error=str(e)
@@ -392,7 +391,11 @@ class ResilientScraper(ABC):
 
             except Exception as e:
                 last_error = e
-                self.logger.warning(f"Attempt {attempt + 1} failed for {url}: {e}")
+                logger.warning("scrape_attempt_failed",
+                             url=url,
+                             attempt=attempt + 1,
+                             scraper_id=self.scraper_id,
+                             error=str(e))
 
                 # Update proxy stats on failure
                 if self.proxy_rotator:
@@ -505,7 +508,7 @@ class ResilientScraper(ABC):
             if cached:
                 return json.loads(cached)
         except Exception as e:
-            self.logger.warning(f"Cache retrieval failed: {e}")
+            logger.warning("cache_retrieval_failed", scraper_id=self.scraper_id, error=str(e))
         return None
 
     async def set_cached_result(self, cache_key: str, data: Dict[str, Any], ttl: int = 3600) -> None:
@@ -517,4 +520,4 @@ class ResilientScraper(ABC):
                 json.dumps(data, default=str)
             )
         except Exception as e:
-            self.logger.warning(f"Cache storage failed: {e}")
+            logger.warning("cache_storage_failed", scraper_id=self.scraper_id, error=str(e))

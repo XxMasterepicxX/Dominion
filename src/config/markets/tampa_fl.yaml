@@ -1,0 +1,78 @@
+# Tampa, Florida Market Configuration
+# Test market #2 - testing multi-city portability
+
+market:
+  name: "Tampa, FL"
+  state: "FL"
+  county: "Hillsborough"
+  timezone: "America/New_York"
+
+geography:
+  fips:
+    state: "12"    # Florida
+    county: "057"  # Hillsborough County
+
+scrapers:
+  # Census scraper - 100% portable, just change FIPS
+  census:
+    enabled: true
+    api_key: null
+
+  # Sunbiz scraper - Florida-wide, exact same config
+  sunbiz:
+    enabled: true
+
+  # Crime data scraper - Tampa uses Socrata
+  crime:
+    enabled: true
+    platform: "socrata"
+    endpoint: "https://data.tampa.gov/resource/8t8d-5r7k"
+
+  # News RSS scraper - 100% portable, different feed URLs
+  news:
+    enabled: true
+    feeds:
+      tampa_bay_times: "https://www.tampabay.com/arc/outboundfeeds/rss/"
+      tampa_tribune: "https://www.tampabaytribune.com/feed/"
+
+  # City Council scraper - Tampa uses OnBase (different platform)
+  council:
+    enabled: false  # Requires OnBase adapter implementation
+    platform: "onbase"
+    endpoint: "https://tampa.novusagenda.com"
+
+  # Property Appraiser - Hillsborough County
+  property:
+    enabled: true
+    portal_base_url: "https://www.hcpafl.org"
+    portal_type: "qpublic"
+    county_code: "HIL"
+    download_url_pattern: "https://www.hcpafl.org/PropertySearch/PropertySearch/Downloads"
+
+  # City Permits scraper - Tampa uses Accela
+  city_permits:
+    enabled: false  # Requires Accela adapter implementation
+    platform: "accela"
+    base_url: "https://aca-prod.accela.com/TAMPA"
+    jurisdiction: "Tampa"
+
+  # County Permits scraper - Hillsborough County uses Accela
+  county_permits:
+    enabled: false  # Requires Accela adapter implementation
+    platform: "accela"
+    base_url: "https://aca.hillsboroughcounty.org"
+    jurisdiction: "Hillsborough County"
+
+  # GIS Shapefile scraper - Hillsborough County GIS
+  gis:
+    enabled: true
+    county_name: "Hillsborough"
+    shapefile_urls:
+      parcels: "https://maps.hillsboroughcounty.org/arcgis/rest/services/InfoLayers/Parcels/MapServer/0/query?where=1%3D1&outFields=*&outSR=4326&f=geojson"
+      zoning: "https://maps.hillsboroughcounty.org/arcgis/rest/services/PlanningDev/Zoning/MapServer/0/query?where=1%3D1&outFields=*&outSR=4326&f=geojson"
+
+  # Business Journal/News scraper - same RSS approach
+  business:
+    enabled: true
+    feeds:
+      tampa_bay_business_journal: "https://www.bizjournals.com/tampabay/feeds/latest.rss"
