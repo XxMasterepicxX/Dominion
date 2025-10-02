@@ -8,7 +8,8 @@
       "Bash(venv_src/Scripts/python.exe:*)",
       "Bash(find:*)",
       "Read(//tmp/**)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(tree:*)"
     ],
     "deny": [],
     "ask": []

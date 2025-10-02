@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from .entity_resolution import EntityResolver
+from .sunbiz_enrichment import SunbizEnrichmentService
 
 from ..database import (
     RawFact,
@@ -47,6 +48,7 @@ class DataIngestionService:
         """
         self.parsers: Dict[str, Callable] = {}
         self.entity_resolver = EntityResolver(llm_client=llm_client)
+        self.sunbiz_enrichment = SunbizEnrichmentService(headless=True)
         self._register_default_parsers()
 
     def _register_default_parsers(self):
@@ -202,6 +204,72 @@ class DataIngestionService:
             select(RawFact).where(RawFact.content_hash == content_hash)
         )
         return result.scalar_one_or_none()
+
+    # ==================== ENRICHMENT ====================
+
+    def _is_company_name(self, name: str) -> bool:
+        """Check if name is a company (has LLC, INC, CORP, etc)"""
+        company_indicators = ['LLC', 'L.L.C', 'INC', 'CORP', 'CORPORATION', 'CO.', 'LTD', 'LP', 'PA']
+        name_upper = name.upper()
+        return any(ind in name_upper for ind in company_indicators)
+
+    async def _enrich_llc(self, raw_content: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Enrich LLC data from Sunbiz website (conditional - only if incomplete)
+
+        Args:
+            raw_content: Raw SFTP data (may have missing fields)
+
+        Returns:
+            Enriched data with full registered agent, officers, etc.
+        """
+        # Check if enrichment is needed
+        is_complete = all([
+            raw_content.get('registered_agent'),
+            raw_content.get('officers'),
+            raw_content.get('status')
+        ])
+
+        if is_complete:
+            logger.info("LLC data already complete, skipping enrichment (fast path)")
+            return raw_content
+
+        # Get document number
+        doc_num = raw_content.get('document_number') or raw_content.get('DocumentNumber')
+
+        if not doc_num:
+            logger.warning("Cannot enrich LLC: missing document_number")
+            return raw_content
+
+        # Enrich from website
+        logger.info(f"Enriching LLC from Sunbiz website: {doc_num}")
+        try:
+            enriched = await self.sunbiz_enrichment.scraper.scrape_entity(doc_num)
+
+            if not enriched:
+                logger.warning(f"Sunbiz enrichment failed for {doc_num} - using SFTP data")
+                return raw_content
+
+            # Merge: website data takes precedence over SFTP
+            merged = {
+                **raw_content,  # SFTP data as base
+                'name': enriched.get('entityName') or raw_content.get('name'),
+                'registered_agent': enriched.get('registeredAgent', {}).get('name'),
+                'registered_agent_address': enriched.get('registeredAgent', {}).get('address'),
+                'officers': enriched.get('officers'),
+                'status': (enriched.get('status') or 'active').lower(),
+                'principal_address': enriched.get('principalAddress'),
+                'mailing_address': enriched.get('mailingAddress'),
+                'fei_ein': enriched.get('feiEin'),
+                '_enriched': True  # Flag to track enrichment
+            }
+
+            logger.info(f"Successfully enriched LLC {doc_num}")
+            return merged
+
+        except Exception as e:
+            logger.error(f"Error enriching LLC {doc_num}: {e}", exc_info=True)
+            return raw_content
 
     # ==================== PARSERS ====================
     # Each parser extracts domain objects from raw data
@@ -374,8 +442,16 @@ class DataIngestionService:
         content: Dict[str, Any],
         db_session: AsyncSession
     ) -> List[LLCFormation]:
-        """Parse LLC formation from Sunbiz"""
-        # Create entity first
+        """
+        Parse LLC formation from Sunbiz
+
+        ENRICHMENT: Automatically enriches incomplete data from Sunbiz website
+        """
+        # STEP 1: Enrich if data is incomplete (conditional, smart)
+        if not content.get('_enriched'):
+            content = await self._enrich_llc(content)
+
+        # STEP 2: Create entity with ENRICHED canonical name
         entity = Entity(
             id=uuid4(),
             entity_type='llc',
@@ -385,26 +461,38 @@ class DataIngestionService:
         db_session.add(entity)
         await db_session.flush()
 
-        # Parse filing date
+        # STEP 3: Parse filing date
         filing_date = self._parse_datetime(content.get('filing_date', content.get('FilingDate')))
         if not filing_date:
             filing_date = datetime.utcnow()
 
-        # Create LLC formation record
+        # STEP 4: Prepare registered agent (combine name + address if available)
+        registered_agent = content.get('registered_agent', content.get('RegisteredAgent'))
+        if registered_agent and content.get('registered_agent_address'):
+            registered_agent = f"{registered_agent}\n{content.get('registered_agent_address')}"
+
+        # STEP 5: Parse officers (already JSON/list from enrichment)
+        import json
+        officers = content.get('officers')
+        if officers and isinstance(officers, list):
+            officers = json.dumps(officers)  # Convert to JSON string for storage
+
+        # STEP 6: Create LLC formation record with ENRICHED data
         llc = LLCFormation(
             id=uuid4(),
             raw_fact_id=raw_fact.id,
             entity_id=entity.id,
             document_number=content.get('document_number', content.get('DocumentNumber', '')),
             filing_date=filing_date,
-            registered_agent=content.get('registered_agent', content.get('RegisteredAgent')),
+            registered_agent=registered_agent,
             principal_address=content.get('principal_address', content.get('PrincipalAddress')),
             is_property_related=content.get('is_real_estate', False),
-            status='active',
-            officers=None
+            status=content.get('status', 'active'),
+            officers=officers  # Now populated from enrichment!
         )
 
         db_session.add(llc)
+        logger.info(f"Created LLC formation: {entity.canonical_name} (enriched: {content.get('_enriched', False)})")
         return [llc]
 
     async def _parse_news_article(
@@ -523,6 +611,8 @@ class DataIngestionService:
         """
         Find existing entity or create new one using EntityResolver
 
+        ENRICHMENT: If it's a company name (LLC/INC/CORP), tries to find in Sunbiz first
+
         Args:
             name: Entity name
             entity_type: Entity type (company, llc, etc.)
@@ -535,6 +625,29 @@ class DataIngestionService:
         """
         if not name or name.strip() == '':
             return None
+
+        # ENRICHMENT STEP: If it's a company, check Sunbiz first
+        if entity_type == 'company' and self._is_company_name(name):
+            logger.info(f"Company name detected: {name} - checking Sunbiz")
+            try:
+                # Search Sunbiz with context (address helps disambiguate)
+                context = {}
+                if additional_data:
+                    if additional_data.get('address'):
+                        context['address'] = additional_data['address']
+                    if additional_data.get('city'):
+                        context['city'] = additional_data['city']
+
+                sunbiz_data = await self.sunbiz_enrichment.search_and_match(name, context or None)
+
+                if sunbiz_data:
+                    # Found in Sunbiz! Create LLC with full data
+                    logger.info(f"Found {name} in Sunbiz: {sunbiz_data.get('documentNumber')}")
+                    return await self._create_llc_from_sunbiz(sunbiz_data, db_session)
+
+            except Exception as e:
+                logger.error(f"Sunbiz enrichment failed for {name}: {e}", exc_info=True)
+                # Continue with normal resolution
 
         # Build scraped data for resolver
         scraped_data = {
@@ -576,6 +689,68 @@ class DataIngestionService:
             db_session.add(entity)
             await db_session.flush()
             return entity
+
+    async def _create_llc_from_sunbiz(
+        self,
+        sunbiz_data: Dict[str, Any],
+        db_session: AsyncSession
+    ) -> Entity:
+        """
+        Create Entity + LLCFormation from enriched Sunbiz data
+
+        Args:
+            sunbiz_data: Complete data from Sunbiz website scraper
+            db_session: Database session
+
+        Returns:
+            Entity object
+        """
+        import json
+
+        # Create entity
+        entity = Entity(
+            id=uuid4(),
+            entity_type='llc',
+            canonical_name=sunbiz_data.get('entityName', ''),
+            fact_based_attributes=sunbiz_data
+        )
+        db_session.add(entity)
+        await db_session.flush()
+
+        # Parse filing date
+        filing_date = self._parse_datetime(sunbiz_data.get('dateFiled'))
+        if not filing_date:
+            filing_date = datetime.utcnow()
+
+        # Prepare registered agent (name + address)
+        reg_agent = sunbiz_data.get('registeredAgent', {})
+        registered_agent = reg_agent.get('name')
+        if registered_agent and reg_agent.get('address'):
+            registered_agent = f"{registered_agent}\n{reg_agent.get('address')}"
+
+        # Parse officers
+        officers = sunbiz_data.get('officers')
+        if officers and isinstance(officers, list):
+            officers = json.dumps(officers)
+
+        # Create LLC formation
+        llc = LLCFormation(
+            id=uuid4(),
+            raw_fact_id=None,  # Created from enrichment, not from raw fact
+            entity_id=entity.id,
+            document_number=sunbiz_data.get('documentNumber'),
+            filing_date=filing_date,
+            registered_agent=registered_agent,
+            principal_address=sunbiz_data.get('principalAddress'),
+            is_property_related=False,  # Unknown from enrichment
+            status=(sunbiz_data.get('status') or 'active').lower(),
+            officers=officers
+        )
+
+        db_session.add(llc)
+        logger.info(f"Created LLC from Sunbiz enrichment: {entity.canonical_name}")
+
+        return entity
 
     def _parse_datetime(self, value: Any) -> Optional[datetime]:
         """Parse datetime from various formats, returning naive UTC datetime"""

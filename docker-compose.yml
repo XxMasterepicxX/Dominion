@@ -13,7 +13,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./src/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
-      - ./src/database/schema_enhancements.sql:/docker-entrypoint-initdb.d/02-enhancements.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d dominion"]
       interval: 10s
@@ -35,95 +34,6 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
-    container_name: dominion_api
-    environment:
-      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-dominion}@postgres:5432/dominion
-      - REDIS_URL=redis://redis:6379/0
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev_secret_change_in_production}
-      - ENVIRONMENT=${ENVIRONMENT:-development}
-    ports:
-      - "8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./src:/app/src
-      - ./logs:/app/logs
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  scraper_worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.scrapers
-    container_name: dominion_scrapers
-    environment:
-      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-dominion}@postgres:5432/dominion
-      - REDIS_URL=redis://redis:6379/0
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ENVIRONMENT=${ENVIRONMENT:-development}
-      - DISPLAY=:99
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./src:/app/src
-      - ./logs:/app/logs
-      - ./data:/app/data
-      - ./testing/BypassV3:/app/BypassV3
-    restart: unless-stopped
-
-  continuous_worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.workers
-    container_name: dominion_workers
-    environment:
-      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-dominion}@postgres:5432/dominion
-      - REDIS_URL=redis://redis:6379/0
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ENVIRONMENT=${ENVIRONMENT:-development}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./src:/app/src
-      - ./logs:/app/logs
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    container_name: dominion_nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-      - ./logs/nginx:/var/log/nginx
-    depends_on:
-      - api
-    restart: unless-stopped
-    profiles: ["production"]
 
 volumes:
   postgres_data:
