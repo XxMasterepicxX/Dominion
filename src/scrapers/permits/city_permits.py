@@ -61,17 +61,25 @@ class PermitRecord:
             return None
 
     def to_dict(self) -> Dict:
-        """Convert to dictionary."""
+        """Convert to dictionary, handling NaN values."""
+        import math
+
+        def clean_value(v):
+            """Convert NaN to None for JSON compatibility."""
+            if isinstance(v, float) and math.isnan(v):
+                return None
+            return v
+
         return {
-            'permit_number': self.permit_number,
-            'permit_type': self.permit_type,
-            'status': self.status,
-            'address': self.address,
-            'applicant': self.applicant,
-            'contractor': self.contractor,
-            'issue_date': self.issue_date,
-            'valuation': self.valuation,
-            'description': self.description,
+            'permit_number': clean_value(self.permit_number),
+            'permit_type': clean_value(self.permit_type),
+            'status': clean_value(self.status),
+            'address': clean_value(self.address),
+            'applicant': clean_value(self.applicant),
+            'contractor': clean_value(self.contractor),
+            'issue_date': clean_value(self.issue_date),
+            'valuation': clean_value(self.valuation),
+            'description': clean_value(self.description),
         }
 
 

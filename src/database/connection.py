@@ -3,16 +3,25 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, Any
 
 import asyncpg
-import redis.asyncio as redis
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
 
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+
+# Redis is optional - only needed for RQ task queue in Week 3+
+try:
+    import redis.asyncio as redis
+    REDIS_AVAILABLE = True
+    RedisType = redis.Redis
+except ImportError:
+    REDIS_AVAILABLE = False
+    RedisType = Any  # type: ignore
+    logger.warning("redis package not installed - Redis features disabled")
 
 class DatabaseManager:
     """Manages database connections and sessions"""
@@ -51,13 +60,22 @@ class DatabaseManager:
                 command_timeout=30.0
             )
 
-            # Initialize Redis connection pool
-            self._redis_pool = redis.ConnectionPool.from_url(
-                settings.REDIS_URL,
-                max_connections=20,
-                retry_on_timeout=True,
-                retry_on_error=[redis.ConnectionError, redis.TimeoutError]
-            )
+            # Initialize Redis connection pool (optional)
+            if REDIS_AVAILABLE:
+                try:
+                    self._redis_pool = redis.ConnectionPool.from_url(
+                        settings.REDIS_URL,
+                        max_connections=20,
+                        retry_on_timeout=True,
+                        retry_on_error=[redis.ConnectionError, redis.TimeoutError]
+                    )
+                    logger.info("Redis connection pool initialized")
+                except Exception as e:
+                    logger.warning(f"Redis connection failed (optional): {e}")
+                    self._redis_pool = None
+            else:
+                logger.info("Redis not available - using PostgreSQL only")
+                self._redis_pool = None
 
             logger.info("Database connections initialized successfully")
 
@@ -113,7 +131,7 @@ class DatabaseManager:
                 raise
 
     @asynccontextmanager
-    async def get_redis(self) -> AsyncGenerator[redis.Redis, None]:
+    async def get_redis(self) -> AsyncGenerator[RedisType, None]:
         """Get Redis connection"""
         if not self._redis_pool:
             raise RuntimeError("Redis pool not initialized")
@@ -132,6 +150,7 @@ class DatabaseManager:
         health_status = {
             "postgres": False,
             "redis": False,
+            "redis_available": REDIS_AVAILABLE,
             "overall": False
         }
 
@@ -143,15 +162,19 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"PostgreSQL health check failed: {e}")
 
-        # Check Redis
-        try:
-            async with self.get_redis() as redis_client:
-                result = await redis_client.ping()
-                health_status["redis"] = result
-        except Exception as e:
-            logger.error(f"Redis health check failed: {e}")
+        # Check Redis (optional)
+        if self._redis_pool:
+            try:
+                async with self.get_redis() as redis_client:
+                    result = await redis_client.ping()
+                    health_status["redis"] = result
+            except Exception as e:
+                logger.warning(f"Redis health check failed (optional): {e}")
+        else:
+            health_status["redis"] = None  # Not configured
 
-        health_status["overall"] = health_status["postgres"] and health_status["redis"]
+        # Overall health requires PostgreSQL (Redis is optional)
+        health_status["overall"] = health_status["postgres"]
         return health_status
 
 # Global database manager instance
@@ -168,7 +191,7 @@ async def get_db_connection() -> AsyncGenerator[asyncpg.Connection, None]:
     async with db_manager.get_connection() as connection:
         yield connection
 
-async def get_redis_connection() -> AsyncGenerator[redis.Redis, None]:
+async def get_redis_connection() -> AsyncGenerator[RedisType, None]:
     """Dependency function to get Redis connection"""
     async with db_manager.get_redis() as redis_client:
         yield redis_client

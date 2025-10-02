@@ -2,22 +2,23 @@ version: '3.8'
 
 services:
   postgres:
-    image: pgvector/pgvector:pg15
+    image: pgvector/pgvector:pg16
     container_name: dominion_postgres
     environment:
       POSTGRES_DB: dominion
-      POSTGRES_USER: dominion
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dominion_dev_pass}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dominion}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./src/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./src/database/schema_enhancements.sql:/docker-entrypoint-initdb.d/02-enhancements.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dominion -d dominion"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dominion"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   redis:
@@ -41,7 +42,7 @@ services:
       dockerfile: Dockerfile.api
     container_name: dominion_api
     environment:
-      - DATABASE_URL=postgresql://dominion:${POSTGRES_PASSWORD:-dominion_dev_pass}@postgres:5432/dominion
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-dominion}@postgres:5432/dominion
       - REDIS_URL=redis://redis:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -70,7 +71,7 @@ services:
       dockerfile: Dockerfile.scrapers
     container_name: dominion_scrapers
     environment:
-      - DATABASE_URL=postgresql://dominion:${POSTGRES_PASSWORD:-dominion_dev_pass}@postgres:5432/dominion
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-dominion}@postgres:5432/dominion
       - REDIS_URL=redis://redis:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -94,7 +95,7 @@ services:
       dockerfile: Dockerfile.workers
     container_name: dominion_workers
     environment:
-      - DATABASE_URL=postgresql://dominion:${POSTGRES_PASSWORD:-dominion_dev_pass}@postgres:5432/dominion
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-dominion}@postgres:5432/dominion
       - REDIS_URL=redis://redis:6379/0
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}

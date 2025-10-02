@@ -191,7 +191,7 @@ class SunbizScraper:
 
             # Metadata
             record['record_type'] = 'formation'
-            record['scraped_at'] = datetime.now()
+            record['scraped_at'] = datetime.now().isoformat()
 
             return record
 
@@ -246,7 +246,7 @@ class SunbizScraper:
 
             # Metadata
             record['record_type'] = 'event'
-            record['scraped_at'] = datetime.now()
+            record['scraped_at'] = datetime.now().isoformat()
 
             return record
 
@@ -254,8 +254,8 @@ class SunbizScraper:
             logger.warning("Failed to parse event record", error=str(e))
             return None
 
-    def _extract_date(self, date_area: str) -> Optional[datetime]:
-        """Extract date from area (MMDDYYYY format)."""
+    def _extract_date(self, date_area: str) -> Optional[str]:
+        """Extract date from area (MMDDYYYY format) and return ISO string."""
         for i in range(len(date_area) - 7):
             potential_date = date_area[i:i+8]
             if potential_date.isdigit():
@@ -265,7 +265,7 @@ class SunbizScraper:
                     year = int(potential_date[4:8])
 
                     if 1 <= month <= 12 and 1 <= day <= 31 and 2020 <= year <= 2030:
-                        return datetime(year, month, day)
+                        return datetime(year, month, day).isoformat()
                 except (ValueError, IndexError):
                     # Invalid date format or out of range
                     continue
