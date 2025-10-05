@@ -113,7 +113,7 @@ class CouncilScraper:
                    platform=self.platform,
                    ssl_verify=verify_ssl)
 
-    def fetch_recent_meetings(self, months_back: int = 3) -> List[MeetingRecord]:
+    def fetch_recent_meetings(self, months_back: int = 3) -> List[Dict]:
         """
         Fetch meetings from the last N months.
 
@@ -121,17 +121,22 @@ class CouncilScraper:
             months_back: Number of months to look back
 
         Returns:
-            List of MeetingRecord objects
+            List of meeting dictionaries (converted from MeetingRecord objects)
         """
+        meetings = []
+
         if self.platform == "escribe":
-            return self._fetch_escribe_ajax_meetings(months_back)
+            meetings = self._fetch_escribe_ajax_meetings(months_back)
         elif self.platform == "legistar":
-            return self._fetch_legistar_meetings(months_back)
+            meetings = self._fetch_legistar_meetings(months_back)
         elif self.platform == "onbase":
-            return self._fetch_onbase_meetings(months_back)
+            meetings = self._fetch_onbase_meetings(months_back)
         else:
             logger.error("unknown_platform", platform=self.platform)
             return []
+
+        # Convert MeetingRecord objects to dicts for compatibility
+        return [meeting.to_dict() for meeting in meetings]
 
     def _fetch_escribe_ajax_meetings(self, months_back: int) -> List[MeetingRecord]:
         """Fetch meetings from eScribe using AJAX endpoints."""

@@ -251,24 +251,43 @@ class PropertyAppraiserScraper:
                     zip_ref.extractall(temp_dir)
                     temp_path = Path(temp_dir)
 
-                    # Find key files
-                    property_file = None
-                    owners_file = None
-                    sales_file = None
+                    # Find ALL key files in CAMA ZIP
+                    cama_files = {}
 
                     for csv_file in temp_path.glob('*.txt'):
                         name_lower = csv_file.name.lower()
-                        if 'property' in name_lower or 'parcel' in name_lower:
-                            property_file = csv_file
-                        elif 'owner' in name_lower:
-                            owners_file = csv_file
-                        elif 'sale' in name_lower:
-                            sales_file = csv_file
 
-                    if property_file:
-                        records = self._parse_and_join_cama_files(
-                            property_file, owners_file, sales_file, limit
-                        )
+                        # Core files
+                        if name_lower == 'property.txt':
+                            cama_files['property'] = csv_file
+                        elif name_lower == 'owners.txt':
+                            cama_files['owners'] = csv_file
+                        elif name_lower == 'sales.txt':
+                            cama_files['sales'] = csv_file
+
+                        # CRITICAL: Assessment values and year built
+                        elif name_lower == 'historyre.txt':
+                            cama_files['history'] = csv_file
+                        elif name_lower == 'improvements.txt':
+                            cama_files['improvements'] = csv_file
+
+                        # Additional detail files
+                        elif name_lower == 'imprvattributes.txt':
+                            cama_files['imprv_attributes'] = csv_file
+                        elif name_lower == 'imprvdetails.txt':
+                            cama_files['imprv_details'] = csv_file
+                        elif name_lower == 'land.txt':
+                            cama_files['land'] = csv_file
+                        elif name_lower == 'legals.txt':
+                            cama_files['legals'] = csv_file
+                        elif name_lower == 'permits.txt':
+                            cama_files['permits'] = csv_file
+                        elif name_lower == 'exemptionsre_history.txt':
+                            cama_files['exemptions'] = csv_file
+
+                    if cama_files.get('property'):
+                        logger.info("cama_files_found", files=list(cama_files.keys()))
+                        records = self._parse_and_join_cama_files(cama_files, limit)
                     else:
                         csv_files = list(temp_path.glob('*.csv')) + list(temp_path.glob('*.txt'))
                         if csv_files:
@@ -284,33 +303,124 @@ class PropertyAppraiserScraper:
 
     def _parse_and_join_cama_files(
         self,
-        property_file: Path,
-        owners_file: Optional[Path],
-        sales_file: Optional[Path],
+        cama_files: Dict[str, Path],
         limit: Optional[int] = None
     ) -> List[PropertyRecord]:
-        """Parse and join multiple CAMA files on parcel ID."""
+        """
+        Parse and join ALL CAMA files on parcel ID.
+
+        Files joined:
+        - Property.txt (base)
+        - Owners.txt (owner info)
+        - Sales.txt (sales history)
+        - HistoryRE.txt (CRITICAL: assessed_value, market_value, land_value)
+        - Improvements.txt (CRITICAL: year_built, heated_sqft)
+        - ImprvAttributes.txt (building attributes)
+        - ImprvDetails.txt (detailed building info)
+        - Land.txt (land characteristics)
+        - Legals.txt (legal descriptions)
+        - Permits.txt (permit history)
+        - ExemptionsRE_History.txt (exemptions)
+        """
         records = []
 
         try:
-            owners_by_parcel = {}
-            if owners_file and owners_file.exists():
-                with open(owners_file, 'r', encoding='utf-8', errors='ignore') as f:
+            # Load all lookup dictionaries indexed by Parcel ID
+            lookup_tables = {}
+
+            # Owners
+            if cama_files.get('owners'):
+                logger.info("loading_owners_data")
+                lookup_tables['owners'] = {}
+                with open(cama_files['owners'], 'r', encoding='utf-8', errors='ignore') as f:
                     reader = csv.DictReader(f, delimiter='\t')
                     for row in reader:
                         parcel = row.get('Parcel', '').strip()
                         if parcel:
-                            owners_by_parcel[parcel] = row
+                            lookup_tables['owners'][parcel] = row
 
-            sales_by_parcel = {}
-            if sales_file and sales_file.exists():
-                with open(sales_file, 'r', encoding='utf-8', errors='ignore') as f:
+            # Sales (get most recent sale per parcel)
+            if cama_files.get('sales'):
+                logger.info("loading_sales_data")
+                lookup_tables['sales'] = {}
+                with open(cama_files['sales'], 'r', encoding='utf-8', errors='ignore') as f:
                     reader = csv.DictReader(f, delimiter='\t')
                     for row in reader:
                         parcel = row.get('Parcel', '').strip()
-                        if parcel and parcel not in sales_by_parcel:
-                            sales_by_parcel[parcel] = row
+                        if parcel and parcel not in lookup_tables['sales']:
+                            lookup_tables['sales'][parcel] = row
 
+            # HistoryRE (get LATEST tax year per parcel - contains assessed/market values)
+            if cama_files.get('history'):
+                logger.info("loading_history_data")
+                lookup_tables['history'] = {}
+                with open(cama_files['history'], 'r', encoding='utf-8', errors='ignore') as f:
+                    reader = csv.DictReader(f, delimiter='\t')
+                    for row in reader:
+                        parcel = row.get('Parcel', '').strip()
+                        if parcel:
+                            # Keep latest tax year only
+                            if parcel not in lookup_tables['history']:
+                                lookup_tables['history'][parcel] = row
+                            else:
+                                current_year = int(row.get('Hist_Tax_Year', 0) or 0)
+                                existing_year = int(lookup_tables['history'][parcel].get('Hist_Tax_Year', 0) or 0)
+                                if current_year > existing_year:
+                                    lookup_tables['history'][parcel] = row
+
+            # Improvements (get most recent improvement per parcel - contains year_built)
+            if cama_files.get('improvements'):
+                logger.info("loading_improvements_data")
+                lookup_tables['improvements'] = {}
+                with open(cama_files['improvements'], 'r', encoding='utf-8', errors='ignore') as f:
+                    reader = csv.DictReader(f, delimiter='\t')
+                    for row in reader:
+                        parcel = row.get('Parcel', '').strip()
+                        if parcel:
+                            # Get latest tax year improvement
+                            if parcel not in lookup_tables['improvements']:
+                                lookup_tables['improvements'][parcel] = row
+                            else:
+                                current_year = int(row.get('TaxYear', 0) or 0)
+                                existing_year = int(lookup_tables['improvements'][parcel].get('TaxYear', 0) or 0)
+                                if current_year > existing_year:
+                                    lookup_tables['improvements'][parcel] = row
+
+            # ImprvAttributes (building attributes - get first/primary)
+            if cama_files.get('imprv_attributes'):
+                logger.info("loading_imprv_attributes_data")
+                lookup_tables['imprv_attributes'] = {}
+                with open(cama_files['imprv_attributes'], 'r', encoding='utf-8', errors='ignore') as f:
+                    reader = csv.DictReader(f, delimiter='\t')
+                    for row in reader:
+                        parcel = row.get('Parcel', '').strip()
+                        if parcel and parcel not in lookup_tables['imprv_attributes']:
+                            lookup_tables['imprv_attributes'][parcel] = row
+
+            # Land
+            if cama_files.get('land'):
+                logger.info("loading_land_data")
+                lookup_tables['land'] = {}
+                with open(cama_files['land'], 'r', encoding='utf-8', errors='ignore') as f:
+                    reader = csv.DictReader(f, delimiter='\t')
+                    for row in reader:
+                        parcel = row.get('Parcel', '').strip()
+                        if parcel and parcel not in lookup_tables['land']:
+                            lookup_tables['land'][parcel] = row
+
+            # Legals
+            if cama_files.get('legals'):
+                logger.info("loading_legals_data")
+                lookup_tables['legals'] = {}
+                with open(cama_files['legals'], 'r', encoding='utf-8', errors='ignore') as f:
+                    reader = csv.DictReader(f, delimiter='\t')
+                    for row in reader:
+                        parcel = row.get('Parcel', '').strip()
+                        if parcel and parcel not in lookup_tables['legals']:
+                            lookup_tables['legals'][parcel] = row
+
+            # Join all data on Property.txt
+            property_file = cama_files['property']
             with open(property_file, 'r', encoding='utf-8', errors='ignore') as f:
                 reader = csv.DictReader(f, delimiter='\t')
 
@@ -320,12 +430,27 @@ class PropertyAppraiserScraper:
 
                     parcel = row.get('Parcel', '').strip()
 
-                    # Merge owner data
-                    if parcel in owners_by_parcel:
-                        row.update(owners_by_parcel[parcel])
+                    # Merge ALL related data
+                    if parcel in lookup_tables.get('owners', {}):
+                        row.update(lookup_tables['owners'][parcel])
 
-                    if parcel in sales_by_parcel:
-                        row.update(sales_by_parcel[parcel])
+                    if parcel in lookup_tables.get('sales', {}):
+                        row.update(lookup_tables['sales'][parcel])
+
+                    if parcel in lookup_tables.get('history', {}):
+                        row.update(lookup_tables['history'][parcel])
+
+                    if parcel in lookup_tables.get('improvements', {}):
+                        row.update(lookup_tables['improvements'][parcel])
+
+                    if parcel in lookup_tables.get('imprv_attributes', {}):
+                        row.update(lookup_tables['imprv_attributes'][parcel])
+
+                    if parcel in lookup_tables.get('land', {}):
+                        row.update(lookup_tables['land'][parcel])
+
+                    if parcel in lookup_tables.get('legals', {}):
+                        row.update(lookup_tables['legals'][parcel])
 
                     data = self._map_fields(row)
 
@@ -333,10 +458,14 @@ class PropertyAppraiserScraper:
                         record = PropertyRecord(data)
                         records.append(record)
 
-            logger.info("cama_files_joined", records_count=len(records))
+            logger.info("cama_files_joined",
+                       records_count=len(records),
+                       files_used=len(lookup_tables))
 
         except Exception as e:
             logger.error("cama_join_failed", error=str(e))
+            import traceback
+            traceback.print_exc()
 
         return records
 
@@ -382,22 +511,78 @@ class PropertyAppraiserScraper:
 
         # Common field mappings for different formats
         field_mappings = {
-            # Alachua CAMA format
+            # Core property fields
             'parcel_id': ['parcel', 'parcel_id', 'parcelid', 'pin', 'property_id', 'folio'],
             'account_number': ['prop_id', 'account', 'account_number', 'acct', 'acct_num'],
             'property_address': ['property_address', 'site_address', 'address', 'location', 'situs'],
+
+            # Owner fields (from Owners.txt)
             'owner_name': ['owner_mail_name', 'owner_name', 'owner', 'owner1', 'name', 'taxpayer'],
-            'owner_address': ['owner_mail_addr1', 'owner_address', 'mail_address', 'mailing_address', 'owner_addr'],
+            # CRITICAL: owner_mail_addr2 has 99.98% coverage, addr1 only 4%, addr3 only 0.3%
+            'owner_address': ['owner_mail_addr2', 'owner_mail_addr1', 'owner_mail_addr3', 'owner_address', 'mail_address', 'mailing_address', 'owner_addr'],
+
+            # Land use / zoning
             'use_code': ['prop_use_code', 'use_code', 'usecode', 'land_use', 'dor_uc', 'propertyuse'],
-            'assessed_value': ['assessed_value', 'assessment', 'assessed', 'just_value'],
-            'market_value': ['market_value', 'appraised_value', 'just_value', 'fmv'],
-            'taxable_value': ['taxable_value', 'taxable', 'tax_value'],
-            'land_value': ['land_value', 'landval', 'land'],
-            'year_built': ['year_built', 'yearbuilt', 'yr_built', 'yr_blt', 'actual_year'],
-            'square_footage': ['htdsqft', 'totsqft', 'square_footage', 'sqft', 'total_area', 'building_area', 'heated_area'],
-            'lot_size_acres': ['acres', 'lot_size_acres', 'acreage', 'land_area'],
-            'bedrooms': ['bedrooms', 'beds', 'bdrms', 'br'],
-            'bathrooms': ['bathrooms', 'baths', 'bath', 'full_bath'],
+
+            # Assessment values (from HistoryRE.txt)
+            'assessed_value': [
+                'county_assessed_value',  # HistoryRE.txt
+                'school_assessed_value',  # HistoryRE.txt alternative
+                'assessed_value',
+                'assessment',
+                'assessed'
+            ],
+            'market_value': [
+                'just_value',  # HistoryRE.txt MAIN field for market value
+                'market_value',
+                'appraised_value',
+                'fmv'
+            ],
+            'taxable_value': [
+                'county_taxable_value',  # HistoryRE.txt
+                'school_taxable_value',  # HistoryRE.txt alternative
+                'taxable_value',
+                'taxable',
+                'tax_value'
+            ],
+            'land_value': [
+                'land_value',  # HistoryRE.txt
+                'landval',
+                'land'
+            ],
+
+            # Building characteristics (from Improvements.txt)
+            'year_built': [
+                'actual_yrblt',  # Improvements.txt MAIN field
+                'effective_yrblt',  # Improvements.txt alternative
+                'year_built',
+                'yearbuilt',
+                'yr_built',
+                'yr_blt',
+                'actual_year'
+            ],
+            'square_footage': [
+                'heated_squarefeet',  # Improvements.txt and HistoryRE.txt
+                'htdsqft',  # Property.txt
+                'totsqft',  # Property.txt alternative
+                'square_footage',
+                'sqft',
+                'total_area',
+                'building_area',
+                'heated_area'
+            ],
+            'lot_size_acres': [
+                'acres',  # Property.txt and Land.txt
+                'lot_size_acres',
+                'acreage',
+                'land_area'
+            ],
+
+            # Room counts (from ImprvAttributes.txt)
+            'bedrooms': ['bedrooms', 'beds', 'bdrms', 'br', 'bed_count'],
+            'bathrooms': ['bathrooms', 'baths', 'bath', 'full_bath', 'bath_count'],
+
+            # Sales info (from Sales.txt)
             'last_sale_date': ['sale_date', 'last_sale_date', 'saledate', 'or_date'],
             'last_sale_price': ['sale_price', 'last_sale_price', 'saleprice', 'or_value'],
         }
@@ -407,8 +592,35 @@ class PropertyAppraiserScraper:
         for field, possible_names in field_mappings.items():
             for name in possible_names:
                 if name in row_lower:
-                    mapped_data[field] = row_lower[name]
-                    break
+                    value = row_lower[name]
+                    # Skip empty/null values - try next field name
+                    if value and value.strip() and value.strip().upper() not in ['NULL', 'N/A', 'NONE']:
+                        mapped_data[field] = value
+                        break
+            # If no non-empty value found, set to None explicitly
+            if field not in mapped_data:
+                mapped_data[field] = None
+
+        # Build complete mailing address from components (Owners.txt has separate city/state/zip)
+        if mapped_data.get('owner_address'):
+            # Check if we have city/state/zip to append
+            city = row_lower.get('owner_mail_city', '').strip()
+            state = row_lower.get('owner_mail_state', '').strip()
+            zip_code = row_lower.get('owner_mail_zip', '').strip()
+
+            # Build full address: "123 MAIN ST, CITY, ST ZIP"
+            address_parts = [mapped_data['owner_address']]
+            if city:
+                address_parts.append(city)
+            if state and zip_code:
+                address_parts.append(f"{state} {zip_code}")
+            elif state:
+                address_parts.append(state)
+            elif zip_code:
+                address_parts.append(zip_code)
+
+            if len(address_parts) > 1:
+                mapped_data['owner_address'] = ', '.join(address_parts)
 
         return mapped_data
 

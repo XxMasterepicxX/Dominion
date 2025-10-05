@@ -21,7 +21,7 @@ import structlog
 from ...config.schemas import MarketConfig
 
 try:
-    from BypassV3.bypass import ReCaptchaV3Bypass
+    from ..BypassV3.bypass import ReCaptchaV3Bypass
 except ImportError:
     ReCaptchaV3Bypass = None
 

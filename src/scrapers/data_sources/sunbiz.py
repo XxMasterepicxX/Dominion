@@ -33,16 +33,38 @@ class SunbizScraper:
     CORPORATE_PATH = "/Public/doc/cor/"
     EVENTS_PATH = "/Public/doc/cor/Events/"
 
-    # Real estate keywords for filtering
-    REAL_ESTATE_KEYWORDS = [
+    # Real estate keywords for filtering (weighted by strength of signal)
+    # Strong signals - almost always property-related
+    STRONG_REAL_ESTATE_KEYWORDS = [
         'REAL ESTATE', 'REALTY', 'PROPERTY', 'PROPERTIES',
         'DEVELOPMENT', 'DEVELOPMENTS', 'DEVELOPER',
+        'LAND', 'HOLDINGS', 'APARTMENT', 'APARTMENTS',
+        'CONDOS', 'CONDO', 'TOWNHOME', 'TOWNHOMES',
+        'ESTATES', 'TITLE', 'MORTGAGE', 'LENDING',
+        'RENTAL', 'RENTALS', 'LEASE', 'LEASING'
+    ]
+
+    # Medium signals - often property-related but context-dependent
+    MEDIUM_REAL_ESTATE_KEYWORDS = [
         'CONSTRUCTION', 'BUILDING', 'BUILDERS',
-        'LAND', 'HOLDINGS', 'INVESTMENT', 'INVESTMENTS',
-        'HOUSING', 'RESIDENTIAL', 'COMMERCIAL',
-        'APARTMENTS', 'CONDOS', 'TOWNHOMES',
-        'ESTATES', 'VENTURES', 'CAPITAL',
-        'RENOVATIONS', 'MANAGEMENT', 'ACQUISITION'
+        'INVESTMENT', 'INVESTMENTS', 'HOUSING',
+        'RESIDENTIAL', 'COMMERCIAL', 'VENTURES',
+        'CAPITAL', 'RENOVATIONS', 'MANAGEMENT',
+        'ACQUISITION', 'EQUITY', 'ASSET', 'ASSETS',
+        'HOME', 'HOMES', 'ROOFING', 'ROOF',
+        'FLOORING', 'FLOOR', 'HVAC', 'PLUMBING',
+        'SOLAR', 'LANDSCAPING', 'LANDSCAPE'
+    ]
+
+    # Exclusion patterns - these indicate NOT property-related
+    EXCLUSION_PATTERNS = [
+        'HOME CARE', 'HOMECARE', 'HOME HEALTH',
+        'HOMESCHOOL', 'HOME SCHOOL',
+        'GAMING RENTAL', 'EQUIPMENT RENTAL',
+        'CAR RENTAL', 'VEHICLE RENTAL',
+        'HOME IMPROVEMENT STORE', 'HOME DECOR',
+        'MOBILE HOME', 'NURSING HOME',
+        'MENTAL HEALTH', 'HOME THERAPY'
     ]
 
     # Event type classifications
@@ -297,10 +319,28 @@ class SunbizScraper:
         return 'unknown'
 
     def _is_real_estate_related(self, name: str) -> bool:
-        """Check if entity name suggests real estate focus."""
+        """
+        Check if entity name suggests real estate focus.
+
+        Uses weighted keyword matching with exclusion patterns:
+        - Strong keywords = automatic match
+        - Medium keywords = match only if no exclusions
+        - Exclusion patterns = automatic rejection
+        """
         name_upper = name.upper()
 
-        for keyword in self.REAL_ESTATE_KEYWORDS:
+        # Check exclusion patterns first
+        for exclusion in self.EXCLUSION_PATTERNS:
+            if exclusion in name_upper:
+                return False
+
+        # Check strong keywords - automatic match
+        for keyword in self.STRONG_REAL_ESTATE_KEYWORDS:
+            if keyword in name_upper:
+                return True
+
+        # Check medium keywords - match if found
+        for keyword in self.MEDIUM_REAL_ESTATE_KEYWORDS:
             if keyword in name_upper:
                 return True
 

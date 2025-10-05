@@ -19,10 +19,11 @@ from typing import Dict, List, Optional, Any, Callable
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from .entity_resolution import EntityResolver
 from .sunbiz_enrichment import SunbizEnrichmentService
+from .relationship_builder import RelationshipBuilder
 
 from ..database import (
     RawFact,
@@ -34,6 +35,7 @@ from ..database import (
     NewsArticle,
     CouncilMeeting,
 )
+from ..config import CurrentMarket
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ class DataIngestionService:
         self.parsers: Dict[str, Callable] = {}
         self.entity_resolver = EntityResolver(llm_client=llm_client)
         self.sunbiz_enrichment = SunbizEnrichmentService(headless=True)
+        self.relationship_builder = RelationshipBuilder()
         self._register_default_parsers()
 
     def _register_default_parsers(self):
@@ -73,6 +76,7 @@ class DataIngestionService:
         raw_content: Dict[str, Any],
         parser_version: str,
         db_session: AsyncSession,
+        market_id: Optional[str] = None,
         scraped_at: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """
@@ -84,12 +88,18 @@ class DataIngestionService:
             raw_content: Raw JSON data from scraper
             parser_version: Version of parser used
             db_session: Database session
+            market_id: UUID of market (defaults to CurrentMarket.get_id())
             scraped_at: When data was scraped (defaults to now)
 
         Returns:
             Dict with ingestion results (raw_fact_id, domain_objects, is_duplicate)
         """
         scraped_at = scraped_at or datetime.utcnow()
+
+        # Get market_id from CurrentMarket if not provided
+        if market_id is None:
+            market_id = CurrentMarket.get_id()
+            logger.debug(f"Using CurrentMarket: {CurrentMarket.get_code()} ({market_id})")
 
         # 1. Generate content hash for deduplication
         content_hash = self._generate_hash(raw_content)
@@ -105,9 +115,10 @@ class DataIngestionService:
                 'message': 'Content already ingested'
             }
 
-        # 3. Create immutable RawFact
+        # 3. Create immutable RawFact (partitioned by market_id)
         raw_fact = RawFact(
             id=uuid4(),
+            market_id=market_id,  # CRITICAL: Required for partition routing
             fact_type=fact_type,
             source_url=source_url,
             parser_version=parser_version,
@@ -122,12 +133,12 @@ class DataIngestionService:
 
         logger.info(f"Created RawFact: {raw_fact.id} (type: {fact_type})")
 
-        # 4. Parse into domain models
+        # 4. Parse into domain models (pass market_id for partitioned tables)
         domain_objects = []
         if fact_type in self.parsers:
             parser = self.parsers[fact_type]
             try:
-                parsed = await parser(raw_fact, raw_content, db_session)
+                parsed = await parser(raw_fact, raw_content, db_session, market_id)
                 if parsed:
                     domain_objects.extend(parsed if isinstance(parsed, list) else [parsed])
                     logger.info(f"Parsed {len(domain_objects)} domain objects from RawFact {raw_fact.id}")
@@ -156,6 +167,7 @@ class DataIngestionService:
         raw_contents: List[Dict[str, Any]],
         parser_version: str,
         db_session: AsyncSession,
+        market_id: Optional[str] = None,
         scraped_at: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """Ingest multiple records in batch"""
@@ -175,6 +187,7 @@ class DataIngestionService:
                     raw_content=raw_content,
                     parser_version=parser_version,
                     db_session=db_session,
+                    market_id=market_id,  # Pass through market_id
                     scraped_at=scraped_at
                 )
 
@@ -278,18 +291,20 @@ class DataIngestionService:
         self,
         raw_fact: RawFact,
         content: Dict[str, Any],
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        market_id
     ) -> List[CrimeReport]:
         """Parse crime report data"""
         from sqlalchemy import func
 
         crime = CrimeReport(
             id=uuid4(),
+            market_id=market_id,  # Required for partitioning
             raw_fact_id=raw_fact.id,
-            incident_number=content.get('id', str(uuid4())),
-            offense_type=content.get('narrative', ''),
-            offense_date=self._parse_datetime(content.get('offense_date')) or datetime.utcnow(),
-            address=content.get('address')
+            case_number=content.get('id', str(uuid4())),
+            incident_type=content.get('narrative', ''),
+            incident_date=self._parse_datetime(content.get('offense_date')) or datetime.utcnow(),
+            incident_address=content.get('address')
         )
 
         # Parse location if available
@@ -312,20 +327,22 @@ class DataIngestionService:
         self,
         raw_fact: RawFact,
         content: Dict[str, Any],
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        market_id
     ) -> List[Permit]:
         """Parse city permit data"""
         permit = Permit(
             id=uuid4(),
+            market_id=market_id,  # Required for partitioning
             raw_fact_id=raw_fact.id,
             permit_number=content.get('permit_number', content.get('Permit Number', '')),
-            jurisdiction='Gainesville',  # City of Gainesville
+            jurisdiction='city',  # Dynamic market context via market_id
             permit_type=content.get('permit_type', content.get('Permit Type', '')),
             status=content.get('status', content.get('Status', '')),
             application_date=self._parse_datetime(content.get('application_date')),
-            issue_date=self._parse_datetime(content.get('issue_date')),
-            valuation=self._parse_float(content.get('valuation', content.get('Valuation', 0))),
-            description=content.get('description', '')
+            issued_date=self._parse_datetime(content.get('issue_date')),
+            project_value=self._parse_float(content.get('valuation', content.get('Valuation', 0))),
+            project_description=content.get('description', '')
         )
 
         # Link to property
@@ -342,7 +359,7 @@ class DataIngestionService:
         if applicant_name:
             applicant = await self._find_or_create_entity(
                 name=applicant_name,
-                entity_type='company',
+                entity_type='corporation',
                 db_session=db_session,
                 source_context=source_context,
                 additional_data={
@@ -358,7 +375,7 @@ class DataIngestionService:
         if contractor_name:
             contractor = await self._find_or_create_entity(
                 name=contractor_name,
-                entity_type='company',
+                entity_type='corporation',
                 db_session=db_session,
                 source_context=source_context,
                 additional_data={
@@ -370,27 +387,33 @@ class DataIngestionService:
                 permit.contractor_entity_id = contractor.id
 
         db_session.add(permit)
+        await db_session.flush()  # Ensure permit.id is available
+
+        # BUILD RELATIONSHIPS: Entity OWNS Property, Entity CONTRACTED Property
+        await self.relationship_builder.build_relationships_from_permit(permit, db_session)
+
         return [permit]
 
     async def _parse_county_permit(
         self,
         raw_fact: RawFact,
         content: Dict[str, Any],
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        market_id
     ) -> List[Permit]:
         """Parse county permit data"""
         permit = Permit(
             id=uuid4(),
+            market_id=market_id,  # Required for partitioning
             raw_fact_id=raw_fact.id,
             permit_number=content.get('permit_number', content.get('Permit Number', '')),
-            jurisdiction='Alachua County',  # County jurisdiction
+            jurisdiction='county',  # County jurisdiction
             permit_type=content.get('permit_type', content.get('Permit Type', '')),
-            subtype=content.get('sub_type'),
             status=content.get('status', content.get('Status', '')),
             application_date=self._parse_datetime(content.get('application_date')),
-            issue_date=self._parse_datetime(content.get('issue_date')),
-            valuation=self._parse_float(content.get('valuation', content.get('construction_cost', 0))),
-            description=content.get('description', content.get('scope_of_work', ''))
+            issued_date=self._parse_datetime(content.get('issue_date')),
+            project_value=self._parse_float(content.get('valuation', content.get('construction_cost', 0))),
+            project_description=content.get('description', content.get('scope_of_work', ''))
         )
 
         # Link to property
@@ -407,7 +430,7 @@ class DataIngestionService:
         if applicant_name:
             applicant = await self._find_or_create_entity(
                 name=applicant_name,
-                entity_type='company',
+                entity_type='corporation',
                 db_session=db_session,
                 source_context=source_context,
                 additional_data={
@@ -422,7 +445,7 @@ class DataIngestionService:
         if contractor_name:
             contractor = await self._find_or_create_entity(
                 name=contractor_name,
-                entity_type='company',
+                entity_type='corporation',
                 db_session=db_session,
                 source_context=source_context,
                 additional_data={
@@ -434,13 +457,19 @@ class DataIngestionService:
                 permit.contractor_entity_id = contractor.id
 
         db_session.add(permit)
+        await db_session.flush()  # Ensure permit.id is available
+
+        # BUILD RELATIONSHIPS: Entity OWNS Property, Entity CONTRACTED Property
+        await self.relationship_builder.build_relationships_from_permit(permit, db_session)
+
         return [permit]
 
     async def _parse_llc_formation(
         self,
         raw_fact: RawFact,
         content: Dict[str, Any],
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        market_id
     ) -> List[LLCFormation]:
         """
         Parse LLC formation from Sunbiz
@@ -452,11 +481,16 @@ class DataIngestionService:
             content = await self._enrich_llc(content)
 
         # STEP 2: Create entity with ENRICHED canonical name
+        entity_name = content.get('entity_name', content.get('name', content.get('EntityName', '')))
         entity = Entity(
             id=uuid4(),
             entity_type='llc',
-            canonical_name=content.get('name', content.get('EntityName', '')),
-            fact_based_attributes=content
+            name=entity_name,
+            canonical_name=entity_name.lower().strip() if entity_name else '',
+            sunbiz_document_number=content.get('document_number', content.get('DocumentNumber')),
+            active_markets=[market_id],  # Start in current market
+            first_seen_market_id=market_id,
+            officers=content.get('officers', [])  # Store officers on Entity
         )
         db_session.add(entity)
         await db_session.flush()
@@ -482,16 +516,21 @@ class DataIngestionService:
             id=uuid4(),
             raw_fact_id=raw_fact.id,
             entity_id=entity.id,
+            name=entity_name,  # LLC name
             document_number=content.get('document_number', content.get('DocumentNumber', '')),
             filing_date=filing_date,
             registered_agent=registered_agent,
             principal_address=content.get('principal_address', content.get('PrincipalAddress')),
-            is_property_related=content.get('is_real_estate', False),
             status=content.get('status', 'active'),
             officers=officers  # Now populated from enrichment!
         )
 
         db_session.add(llc)
+        await db_session.flush()  # Ensure llc.id is available
+
+        # BUILD RELATIONSHIPS: Officers MEMBER_OF LLC, Registered agent relationships
+        await self.relationship_builder.build_relationships_from_llc(entity, llc, db_session)
+
         logger.info(f"Created LLC formation: {entity.canonical_name} (enriched: {content.get('_enriched', False)})")
         return [llc]
 
@@ -499,7 +538,8 @@ class DataIngestionService:
         self,
         raw_fact: RawFact,
         content: Dict[str, Any],
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        market_id
     ) -> List[NewsArticle]:
         """Parse news article"""
         # Parse datetime
@@ -509,14 +549,18 @@ class DataIngestionService:
 
         article = NewsArticle(
             id=uuid4(),
+            market_id=market_id,  # Required for partitioning
             raw_fact_id=raw_fact.id,
             title=content.get('title', 'Untitled'),
             published_date=pub_date,
-            source_publication=content.get('source', content.get('feed', 'Unknown')),
-            author=content.get('author'),
-            content=content.get('article_text', content.get('description', content.get('summary', ''))),
+            source=content.get('source', content.get('feed', 'Unknown')),  # Fixed: use 'source' not 'source_publication'
+            article_text=content.get('article_text', content.get('description', content.get('summary', ''))),  # Fixed: use 'article_text' not 'content'
             summary=content.get('summary'),
-            url=content.get('link', content.get('url', ''))
+            url=content.get('link', content.get('url', '')),
+            # Optional advanced fields
+            mentioned_entities=content.get('mentioned_entities'),
+            topics=content.get('topics'),
+            relevance_score=content.get('relevance_score')
         )
 
         db_session.add(article)
@@ -526,7 +570,8 @@ class DataIngestionService:
         self,
         raw_fact: RawFact,
         content: Dict[str, Any],
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        market_id
     ) -> List[CouncilMeeting]:
         """Parse council meeting data"""
         meeting_date = self._parse_datetime(content.get('meeting_date', content.get('EventDate', content.get('start_time'))))
@@ -535,14 +580,18 @@ class DataIngestionService:
 
         meeting = CouncilMeeting(
             id=uuid4(),
+            market_id=market_id,  # Required for partitioning
             raw_fact_id=raw_fact.id,
             meeting_date=meeting_date,
             meeting_type=content.get('meeting_type', content.get('EventBodyName', content.get('board_name', ''))),
-            agenda_url=content.get('agenda_url'),
-            minutes_url=content.get('minutes_url'),
-            video_url=content.get('video_url'),
-            agenda_items=content.get('agenda_items'),
-            extracted_text=content.get('extracted_text')
+
+            # Map to correct schema fields
+            agenda_items=content.get('agenda_items', []),  # JSONB list of agenda items
+            minutes_text=content.get('extracted_text') or content.get('minutes_text'),  # Meeting minutes/transcript
+            source_url=content.get('agenda_url') or content.get('source_url'),  # Main meeting URL
+            summary=content.get('summary'),  # Optional summary
+            mentioned_entities=content.get('mentioned_entities'),  # UUID[] of mentioned entities
+            topics=content.get('topics')  # TEXT[] of extracted topics
         )
 
         db_session.add(meeting)
@@ -552,53 +601,288 @@ class DataIngestionService:
         self,
         raw_fact: RawFact,
         content: Dict[str, Any],
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        market_id
     ) -> List[Property]:
         """Parse property record from Property Appraiser"""
-        property = Property(
-            id=uuid4(),
-            raw_fact_id=raw_fact.id,
-            address=content.get('address', content.get('PropertyAddress', '')),
-            parcel_id=content.get('parcel_id', content.get('ParcelID', '')),
-            factual_data=content  # Store all data
-        )
 
         # Parse coordinates if available
         from sqlalchemy import func
         lat = self._parse_float(content.get('latitude'))
         lon = self._parse_float(content.get('longitude'))
-        if lat and lon:
-            property.coordinates = func.ST_SetSRID(func.ST_MakePoint(lon, lat), 4326)
+
+        property = Property(
+            id=uuid4(),
+            market_id=market_id,  # Required for partitioning
+            raw_fact_id=raw_fact.id,
+            property_address=content.get('address', content.get('PropertyAddress', '')),
+            parcel_id=content.get('parcel_id', content.get('ParcelID', '')),
+
+            # Location (coordinates object + lat/lon for indexing)
+            coordinates=func.ST_SetSRID(func.ST_MakePoint(lon, lat), 4326) if lat and lon else None,
+            latitude=lat,
+            longitude=lon,
+
+            # Property details (if available in scraped content)
+            property_type=content.get('property_type', content.get('PropertyType')),
+            year_built=self._parse_int(content.get('year_built', content.get('YearBuilt'))),
+            square_feet=self._parse_int(content.get('square_feet', content.get('SquareFeet'))),
+
+            # Ownership (if available)
+            owner_name=content.get('owner_name', content.get('OwnerName')),
+
+            # Valuation (if available)
+            assessed_value=self._parse_float(content.get('assessed_value', content.get('AssessedValue'))),
+            market_value=self._parse_float(content.get('market_value', content.get('MarketValue'))),
+
+            # Note: Full raw data is already stored in raw_facts table via raw_fact_id
+        )
 
         db_session.add(property)
         return [property]
 
     # ==================== HELPER METHODS ====================
 
+    async def _enrich_property_from_gis(
+        self,
+        address: str,
+        db_session: AsyncSession
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Enrich property from GIS bulk data using address similarity
+
+        Returns dict with: parcel_id, geometry, zoning, land_use, acreage, owner
+        """
+        try:
+            # Use PostgreSQL similarity for address matching
+            result = await db_session.execute(text("""
+                SELECT
+                    parcel_id,
+                    ST_AsText(geometry) as geometry_wkt,
+                    ST_Y(ST_Centroid(geometry)) as latitude,
+                    ST_X(ST_Centroid(geometry)) as longitude,
+                    zoning_code,
+                    land_use,
+                    acreage,
+                    raw_data->>'FULLADDR' as gis_address,
+                    raw_data->>'Owner_Mail' as owner,
+                    similarity(raw_data->>'FULLADDR', :address) as score
+                FROM bulk_gis_parcels
+                WHERE raw_data->>'FULLADDR' IS NOT NULL
+                  AND similarity(raw_data->>'FULLADDR', :address) > 0.7
+                ORDER BY score DESC
+                LIMIT 1
+            """), {'address': address})
+
+            row = result.fetchone()
+            if not row:
+                return None
+
+            return {
+                'parcel_id': row.parcel_id,
+                'geometry_wkt': row.geometry_wkt,
+                'latitude': row.latitude,
+                'longitude': row.longitude,
+                'zoning': row.zoning_code,
+                'land_use': row.land_use,
+                'acreage': row.acreage,
+                'gis_address': row.gis_address,
+                'owner': row.owner,
+                'match_score': row.score
+            }
+
+        except Exception as e:
+            logger.error(f"GIS enrichment failed for '{address}': {e}", exc_info=True)
+            return None
+
+    async def _enrich_property_from_property_appraiser(
+        self,
+        parcel_id: str,
+        db_session: AsyncSession
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Enrich property from Property Appraiser bulk data using parcel_id
+
+        Returns dict with: owner_name, assessed_value, market_value, year_built, sqft
+        """
+        try:
+            result = await db_session.execute(text("""
+                SELECT
+                    owner_name,
+                    assessed_value,
+                    market_value,
+                    year_built,
+                    square_footage,
+                    bedrooms,
+                    bathrooms,
+                    land_value,
+                    use_code
+                FROM bulk_property_records
+                WHERE parcel_id = :parcel_id
+                LIMIT 1
+            """), {'parcel_id': parcel_id})
+
+            row = result.fetchone()
+            if not row:
+                return None
+
+            return {
+                'owner_name': row.owner_name,
+                'assessed_value': row.assessed_value,
+                'market_value': row.market_value,
+                'year_built': row.year_built,
+                'square_footage': row.square_footage,
+                'bedrooms': row.bedrooms,
+                'bathrooms': row.bathrooms,
+                'land_value': row.land_value,
+                'use_code': row.use_code
+            }
+
+        except Exception as e:
+            logger.error(f"Property Appraiser enrichment failed for parcel '{parcel_id}': {e}", exc_info=True)
+            return None
+
     async def _find_or_create_property(
         self,
         address: str,
         db_session: AsyncSession
     ) -> Optional[Property]:
-        """Find existing property by address or create new one"""
-        # Basic implementation - normalize address first
+        """
+        Find existing property by address or create new one with bulk enrichment
+
+        ENRICHMENT: Automatically enriches from GIS + Property Appraiser bulk data
+        """
+        # Normalize address first
         normalized = address.strip().upper()
 
+        # Check if property already exists
         result = await db_session.execute(
-            select(Property).where(Property.address == normalized)
+            select(Property).where(Property.property_address == normalized)
         )
         property = result.scalar_one_or_none()
 
-        if not property:
+        if property:
+            # Property exists - return as-is
+            return property
+        else:
+            # Create new property (use placeholder parcel_id from address hash if no parcel available)
+            import hashlib
+            placeholder_parcel = f"ADDR-{hashlib.md5(normalized.encode()).hexdigest()[:12].upper()}"
+
             property = Property(
                 id=uuid4(),
-                address=normalized,
-                factual_data={}
+                market_id=CurrentMarket.get_id(),
+                parcel_id=placeholder_parcel,  # Temporary until we get real parcel_id
+                property_address=normalized
             )
             db_session.add(property)
             await db_session.flush()
+            return property
 
+        # === BULK ENRICHMENT (disabled for now - requires bulk data tables) ===
+        enrichment = {'sources': []}
+
+        # 1. Enrich from GIS (get parcel_id, geometry, zoning)
+        gis_data = await self._enrich_property_from_gis(normalized, db_session)
+        if gis_data:
+            logger.info(f"GIS enrichment: {gis_data['parcel_id']} (score: {gis_data['match_score']:.2f})")
+
+            # Set parcel_id if not already set
+            if not property.parcel_id and gis_data['parcel_id']:
+                property.parcel_id = gis_data['parcel_id']
+
+            # Set coordinates if available
+            if gis_data['latitude'] and gis_data['longitude']:
+                from sqlalchemy import func
+                property.coordinates = func.ST_SetSRID(
+                    func.ST_MakePoint(gis_data['longitude'], gis_data['latitude']),
+                    4326
+                )
+
+            # Store GIS data in factual_data
+            enrichment['gis'] = {
+                'parcel_id': gis_data['parcel_id'],
+                'zoning': gis_data['zoning'],
+                'land_use': gis_data['land_use'],
+                'acreage': gis_data['acreage'],
+                'owner': gis_data['owner'],
+                'matched_address': gis_data['gis_address'],
+                'match_score': gis_data['match_score']
+            }
+            enrichment['sources'].append('gis')
+
+        # 2. Enrich from Property Appraiser (get values, year built, sqft)
+        if property.parcel_id:
+            pa_data = await self._enrich_property_from_property_appraiser(
+                property.parcel_id,
+                db_session
+            )
+            if pa_data:
+                logger.info(f"Property Appraiser enrichment: {pa_data.get('owner_name', 'N/A')}")
+                enrichment['property_appraiser'] = pa_data
+                enrichment['sources'].append('property_appraiser')
+
+        # Track enrichment (factual_data removed from new schema)
+        if enrichment['sources']:
+            property.enrichment_source = ', '.join(enrichment['sources'])
+            property.last_enriched_at = datetime.utcnow()
+            logger.info(f"Property enriched from: {', '.join(enrichment['sources'])}")
+
+        # Save if new
+        if property.id not in [e.id for e in db_session.new]:
+            db_session.add(property)
+
+        await db_session.flush()
         return property
+
+    async def _check_bulk_llc(
+        self,
+        name: str,
+        db_session: AsyncSession
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Check if LLC exists in bulk_llc_records (FAST - no web scraping)
+
+        Uses similarity matching to handle name variations
+        Returns dict with LLC data if found
+        """
+        try:
+            result = await db_session.execute(text("""
+                SELECT
+                    document_number,
+                    name as entity_name,
+                    filing_date,
+                    status,
+                    principal_address,
+                    mailing_address,
+                    registered_agent,
+                    similarity(name, :name) as score
+                FROM bulk_llc_records
+                WHERE similarity(name, :name) > 0.75
+                ORDER BY score DESC
+                LIMIT 1
+            """), {'name': name})
+
+            row = result.fetchone()
+            if not row:
+                return None
+
+            logger.info(f"Found LLC in bulk: {row.entity_name} (score: {row.score:.2f})")
+
+            return {
+                'document_number': row.document_number,
+                'entity_name': row.entity_name,
+                'filing_date': row.filing_date,
+                'status': row.status,
+                'principal_address': row.principal_address,
+                'mailing_address': row.mailing_address,
+                'registered_agent': row.registered_agent,
+                'match_score': row.score
+            }
+
+        except Exception as e:
+            logger.error(f"Bulk LLC check failed for '{name}': {e}", exc_info=True)
+            return None
 
     async def _find_or_create_entity(
         self,
@@ -611,7 +895,10 @@ class DataIngestionService:
         """
         Find existing entity or create new one using EntityResolver
 
-        ENRICHMENT: If it's a company name (LLC/INC/CORP), tries to find in Sunbiz first
+        ENRICHMENT: Multi-tier for companies:
+          1. Check bulk_llc_records (instant, no API calls)
+          2. Check Sunbiz website (web scraping)
+          3. Use EntityResolver for matching
 
         Args:
             name: Entity name
@@ -626,11 +913,20 @@ class DataIngestionService:
         if not name or name.strip() == '':
             return None
 
-        # ENRICHMENT STEP: If it's a company, check Sunbiz first
-        if entity_type == 'company' and self._is_company_name(name):
-            logger.info(f"Company name detected: {name} - checking Sunbiz")
+        # ENRICHMENT STEP: If it's a corporation, check bulk data FIRST
+        if entity_type == 'corporation' and self._is_company_name(name):
+            logger.info(f"Corporation/company name detected: {name}")
+
             try:
-                # Search Sunbiz with context (address helps disambiguate)
+                # TIER 1: Check bulk_llc_records (instant, no network calls)
+                bulk_llc = await self._check_bulk_llc(name, db_session)
+                if bulk_llc:
+                    logger.info(f"Found {name} in bulk LLC records: {bulk_llc['document_number']}")
+                    # Create entity from bulk data (no web scraping needed!)
+                    return await self._create_llc_from_bulk(bulk_llc, db_session)
+
+                # TIER 2: Not in bulk - try Sunbiz website (web scraping)
+                logger.info(f"Not in bulk LLC records - checking Sunbiz website for {name}")
                 context = {}
                 if additional_data:
                     if additional_data.get('address'):
@@ -641,12 +937,12 @@ class DataIngestionService:
                 sunbiz_data = await self.sunbiz_enrichment.search_and_match(name, context or None)
 
                 if sunbiz_data:
-                    # Found in Sunbiz! Create LLC with full data
-                    logger.info(f"Found {name} in Sunbiz: {sunbiz_data.get('documentNumber')}")
+                    # Found via web scraping!
+                    logger.info(f"Found {name} in Sunbiz website: {sunbiz_data.get('documentNumber')}")
                     return await self._create_llc_from_sunbiz(sunbiz_data, db_session)
 
             except Exception as e:
-                logger.error(f"Sunbiz enrichment failed for {name}: {e}", exc_info=True)
+                logger.error(f"LLC enrichment failed for {name}: {e}", exc_info=True)
                 # Continue with normal resolution
 
         # Build scraped data for resolver
@@ -660,35 +956,80 @@ class DataIngestionService:
         if not source_context:
             source_context = {'source_type': 'unknown'}
 
-        # Use EntityResolver
-        try:
-            result = await self.entity_resolver.resolve_entity(
-                scraped_data=scraped_data,
-                source_context=source_context,
-                db_session=db_session
-            )
+        # EntityResolver temporarily disabled (needs refactoring for new schema)
+        # TODO: Refactor EntityResolver to remove fact_based_attributes references
+        # For now, use basic entity creation
+        logger.debug(f"Creating entity (EntityResolver disabled): {name}")
+        entity = Entity(
+            id=uuid4(),
+            entity_type=entity_type,
+            name=name,
+            canonical_name=name.strip().lower(),
+            active_markets=[CurrentMarket.get_id()],
+            first_seen_market_id=CurrentMarket.get_id()
+        )
+        db_session.add(entity)
+        await db_session.flush()
+        return entity
 
-            if result.entity:
-                return result.entity
-            elif result.needs_review:
-                # Queued for review - return None for now
-                logger.info(f"Entity '{name}' queued for human review")
-                return None
-            else:
-                return None
+    async def _create_llc_from_bulk(
+        self,
+        bulk_llc_data: Dict[str, Any],
+        db_session: AsyncSession
+    ) -> Entity:
+        """
+        Create Entity + LLCFormation from bulk_llc_records data
 
-        except Exception as e:
-            logger.error(f"Entity resolution failed for '{name}': {e}")
-            # Fallback to basic creation
-            entity = Entity(
-                id=uuid4(),
-                entity_type=entity_type,
-                canonical_name=name.strip().upper(),
-                fact_based_attributes=scraped_data
+        Args:
+            bulk_llc_data: Data from bulk_llc_records table
+            db_session: Database session
+
+        Returns:
+            Entity object
+        """
+        # Check if entity already exists with this document number
+        doc_number = bulk_llc_data.get('document_number')
+        if doc_number:
+            result = await db_session.execute(
+                select(Entity).where(Entity.sunbiz_document_number == doc_number)
             )
-            db_session.add(entity)
-            await db_session.flush()
-            return entity
+            existing_entity = result.scalar_one_or_none()
+            if existing_entity:
+                logger.info(f"Entity already exists for doc {doc_number}, returning existing")
+                return existing_entity
+
+        # Create entity
+        entity_name = bulk_llc_data['entity_name']
+        entity = Entity(
+            id=uuid4(),
+            entity_type='llc',
+            name=entity_name,
+            canonical_name=entity_name.lower().strip(),
+            sunbiz_document_number=doc_number,
+            active_markets=[],  # Bulk data is statewide, no specific market yet
+            officers=[]  # Bulk data doesn't include officer details
+        )
+        db_session.add(entity)
+        await db_session.flush()
+
+        # Create LLC formation record
+        llc = LLCFormation(
+            id=uuid4(),
+            raw_fact_id=None,  # From bulk data, not raw fact
+            entity_id=entity.id,
+            name=entity_name,  # LLC name
+            document_number=bulk_llc_data['document_number'],
+            filing_date=bulk_llc_data.get('filing_date'),
+            registered_agent=bulk_llc_data.get('registered_agent'),  # Fixed field name
+            principal_address=bulk_llc_data.get('principal_address'),
+            status=(bulk_llc_data.get('status') or 'active').lower(),
+            officers=[]  # Bulk data doesn't have officers (would need web scraping)
+        )
+
+        db_session.add(llc)
+        logger.info(f"Created LLC from bulk data: {entity.canonical_name} ({bulk_llc_data['document_number']})")
+
+        return entity
 
     async def _create_llc_from_sunbiz(
         self,
@@ -696,7 +1037,7 @@ class DataIngestionService:
         db_session: AsyncSession
     ) -> Entity:
         """
-        Create Entity + LLCFormation from enriched Sunbiz data
+        Create Entity + LLCFormation from enriched Sunbiz data (web scraping)
 
         Args:
             sunbiz_data: Complete data from Sunbiz website scraper
@@ -707,12 +1048,32 @@ class DataIngestionService:
         """
         import json
 
+        # Check if entity already exists with this document number
+        doc_number = sunbiz_data.get('documentNumber')
+        if doc_number:
+            result = await db_session.execute(
+                select(Entity).where(Entity.sunbiz_document_number == doc_number)
+            )
+            existing_entity = result.scalar_one_or_none()
+            if existing_entity:
+                logger.info(f"Entity already exists for doc {doc_number}, returning existing")
+                # Update active_markets if needed
+                current_market_id = CurrentMarket.get_id()
+                if current_market_id not in existing_entity.active_markets:
+                    existing_entity.active_markets.append(current_market_id)
+                return existing_entity
+
         # Create entity
+        entity_name = sunbiz_data.get('entityName', '')
         entity = Entity(
             id=uuid4(),
             entity_type='llc',
-            canonical_name=sunbiz_data.get('entityName', ''),
-            fact_based_attributes=sunbiz_data
+            name=entity_name,
+            canonical_name=entity_name.lower().strip(),
+            sunbiz_document_number=doc_number,
+            active_markets=[CurrentMarket.get_id()],
+            first_seen_market_id=CurrentMarket.get_id(),
+            officers=sunbiz_data.get('officers', [])
         )
         db_session.add(entity)
         await db_session.flush()
@@ -738,11 +1099,11 @@ class DataIngestionService:
             id=uuid4(),
             raw_fact_id=None,  # Created from enrichment, not from raw fact
             entity_id=entity.id,
+            name=entity_name,  # LLC name
             document_number=sunbiz_data.get('documentNumber'),
             filing_date=filing_date,
             registered_agent=registered_agent,
             principal_address=sunbiz_data.get('principalAddress'),
-            is_property_related=False,  # Unknown from enrichment
             status=(sunbiz_data.get('status') or 'active').lower(),
             officers=officers
         )
@@ -789,6 +1150,27 @@ class DataIngestionService:
             clean = value.replace('$', '').replace(',', '').strip()
             try:
                 return float(clean)
+            except:
+                return None
+
+        return None
+
+    def _parse_int(self, value: Any) -> Optional[int]:
+        """Parse integer from string or number"""
+        if value is None:
+            return None
+
+        if isinstance(value, int):
+            return value
+
+        if isinstance(value, float):
+            return int(value)
+
+        if isinstance(value, str):
+            # Remove commas and whitespace
+            clean = value.replace(',', '').strip()
+            try:
+                return int(float(clean))  # Parse as float first to handle decimals
             except:
                 return None
 

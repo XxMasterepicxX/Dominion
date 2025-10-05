@@ -67,16 +67,17 @@ log/
 
 # Testing
 tests/
-testing/
 test_output/
 *.test
 .pytest_cache/
 .coverage
 htmlcov/
+*.pyc
 
 # Data files
 data/temp/
 data/cache/
+browser_data/
 *.csv
 *.json
 *.txt
@@ -85,6 +86,7 @@ data/cache/
 .dockerignore
 
 # Backup files
+backups/
 *.bak
 *.backup
 *.orig

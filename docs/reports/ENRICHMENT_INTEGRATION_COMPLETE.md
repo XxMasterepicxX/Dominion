@@ -111,9 +111,9 @@ if registered_agent and not is_professional_service(agent):
 1. Document Number (L12345678, etc.) → 99.9%
 2. Tax ID / EIN → 99.9%
 3. Parcel ID → 99.9%
-4. **Registered Agent** (individual, not service) → 98.0%
 
-**Tier 2: Multi-Signal (70-95% confidence)**
+**Tier 2: Multi-Signal Scoring (70-95% confidence)**
+- Registered Agent (as signal, not definitive key)
 - Name similarity + address + phone + email
 - Weighted scoring based on source type
 
@@ -239,7 +239,7 @@ Create test file to verify:
 
 **Implementation:**
 - ✅ Added `_normalize_registered_agent()` method
-- ✅ Registered agent is Tier 1 definitive key
+- ✅ Registered agent used as multi-signal (Signal 6)
 - ✅ Filters professional services (CT Corp, etc.)
 
 **Line 330-353: Confidence Tiers**
@@ -247,9 +247,10 @@ Create test file to verify:
 > "70-94% confidence: Queue for validation"
 
 **Implementation:**
-- ✅ Registered agent match: 98% confidence (auto-accept)
-- ✅ Document number match: 99.9% confidence (auto-accept)
-- ✅ Multi-signal < 85%: Human review
+- ✅ Registered agent: Used in multi-signal scoring (weighted signal)
+- ✅ Document number match: 99.9% confidence (auto-accept, definitive)
+- ✅ Multi-signal ≥85%: Auto-accept
+- ✅ Multi-signal < 85%: Human review or create new
 
 ---
 

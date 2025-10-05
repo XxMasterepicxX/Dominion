@@ -71,12 +71,13 @@ scrapers:
     installation_id: "318"  # Alachua County's CitizenServe installation ID
 
   # GIS Shapefile scraper - Alachua County GIS data
-  # Downloads ZIP files containing shapefiles (NOT GeoJSON)
+  # Downloads ZIP files containing shapefiles AND GeoJSON from ArcGIS Hub
   gis:
     enabled: true
     county_name: "Alachua"
     shapefile_urls:
       parcels: "https://s3.amazonaws.com/maps.acpafl.org/GIS/publicparcels.zip"
+      zoning: "https://opendata.arcgis.com/datasets/acgm::alachua-county-zoning.geojson"
 
   # Business Journal scraper - ACTUAL sources from business_journal_scraper.py
   business:

@@ -8,9 +8,10 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config.loader import load_market_config
+from src.config.current_market import CurrentMarket
 from src.services.data_ingestion import DataIngestionService
 from src.database.connection import db_manager
 
@@ -37,25 +38,35 @@ async def run_city_permits(market_config, days_back=30):
         async with db_manager.get_session() as db_session:
             ingested = 0
             duplicates = 0
+            errors = 0
 
             for i, permit in enumerate(permits, 1):
-                result = await ingestion_service.ingest(
-                    fact_type='city_permit',
-                    source_url=f'https://www4.citizenserve.com/{scraper.jurisdiction}',
-                    raw_content=permit.to_dict(),
-                    parser_version='v1.0',
-                    db_session=db_session
-                )
+                try:
+                    result = await ingestion_service.ingest(
+                        fact_type='city_permit',
+                        source_url=f'https://www4.citizenserve.com/{scraper.jurisdiction}',
+                        raw_content=permit.to_dict(),
+                        parser_version='v1.0',
+                        db_session=db_session
+                    )
 
-                if result['is_duplicate']:
-                    duplicates += 1
-                else:
-                    ingested += 1
+                    if result['is_duplicate']:
+                        duplicates += 1
+                    else:
+                        ingested += 1
+
+                except Exception as e:
+                    errors += 1
+                    if errors <= 5:  # Only print first 5 errors
+                        print(f"  Error on permit {i}: {str(e)[:100]}")
+                    await db_session.rollback()
 
                 if i % 100 == 0:
-                    print(f"  Progress: {i}/{len(permits)}")
+                    print(f"  Progress: {i}/{len(permits)}, Errors: {errors}")
 
             await db_session.commit()
+            if errors > 0:
+                print(f"  Total errors: {errors}")
 
         print(f"[OK] City Permits: {ingested} ingested, {duplicates} duplicates")
         return {'total': len(permits), 'ingested': ingested, 'duplicates': duplicates}
@@ -342,7 +353,7 @@ async def main():
     """Run all scrapers"""
 
     print("=" * 80)
-    print("RUNNING ALL SCRAPERS - GAINESVILLE, FL (FIXED)")
+    print("RUNNING ALL SCRAPERS - GAINESVILLE, FL (MULTI-MARKET)")
     print("=" * 80)
 
     # Initialize database
@@ -351,6 +362,10 @@ async def main():
     # Load market config
     market_config = load_market_config("gainesville_fl")
     print(f"\nMarket: {market_config.market.name}")
+
+    # Initialize CurrentMarket context (CRITICAL for multi-market support)
+    await CurrentMarket.initialize(market_code='gainesville_fl')
+    print(f"CurrentMarket initialized: {CurrentMarket.get_code()} ({CurrentMarket.get_id()})")
 
     results = {}
 
@@ -400,34 +415,32 @@ async def main():
             ('news_articles', 'News Articles'),
             ('council_meetings', 'Council Meetings'),
             ('llc_formations', 'LLC Formations'),
-            ('raw_facts_partitioned', 'Raw Facts (Total)'),
+            ('raw_facts', 'Raw Facts (Total)'),
             ('properties', 'Properties'),
-            ('entity_resolution_log', 'Entity Resolution Decisions (ML Data)')
+            ('bulk_property_records', 'Bulk Property Records (CAMA)'),
+            ('bulk_llc_records', 'Bulk LLC Records (Sunbiz)')
         ]
 
         for table, label in tables:
             try:
                 count = await db_session.scalar(text(f"SELECT COUNT(*) FROM {table}"))
                 stats[label] = count
-            except:
-                stats[label] = 0
+            except Exception as e:
+                stats[label] = f"Error: {str(e)[:50]}"
 
         for label, count in stats.items():
-            print(f"{label:.<50} {count:>10,}")
-
-        # Review queue
-        review_count = await db_session.scalar(
-            text("SELECT COUNT(*) FROM entity_review_queue WHERE status = 'pending'")
-        )
-        if review_count > 0:
-            print(f"\nReview Queue (needs validation){'':.<30} {review_count:>10,}")
+            if isinstance(count, int):
+                print(f"{label:.<50} {count:>10,}")
+            else:
+                print(f"{label:.<50} {count}")
 
     print("\n" + "=" * 80)
     print("ALL SCRAPERS COMPLETE")
     print("=" * 80)
-    print("\nML Training Data:")
-    print("  Table: entity_resolution_log")
-    print("  Export: COPY entity_resolution_log TO 'ml_training_data.csv' CSV HEADER;")
+    print("\nNext Steps:")
+    print("  - Import CAMA bulk data: python scripts/bulk_data_sync.py")
+    print("  - Import Sunbiz bulk data: (bulk scraper)")
+    print("  - Run entity resolution across markets")
 
 
 if __name__ == "__main__":

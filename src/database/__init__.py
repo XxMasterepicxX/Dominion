@@ -1,65 +1,59 @@
-# Database package for Dominion Real Estate Intelligence
+# Database package for Dominion Real Estate Intelligence - Multi-Market V2
 
 from .connection import DatabaseManager
 from .models import (
     Base,
-    # Core provenance
-    ContentSnapshot,
-    RawFact,
-    StructuredFact,
-    FactEvent,
-    # Domain entities
-    Property,
+    # Global layer
+    Market,
     Entity,
     EntityRelationship,
-    # Domain tables
-    Permit,
-    PropertySale,
-    LLCFormation,
-    NewsArticle,
-    CouncilMeeting,
-    CrimeReport,
-    # AI insights
-    AIInference,
-    InferenceRelationship,
-    InferenceOutcome,
-    # Caching
-    LLMCache,
-    # Operational
-    ScraperRun,
-    DataQualityCheck,
-    IntelligenceAlert,
     User,
-    APIKey,
+    # Event layer (partitioned)
+    RawFact,
+    Property,
+    Permit,
+    CrimeReport,
+    CouncilMeeting,
+    NewsArticle,
+    # Business entities
+    LLCFormation,
+    # Bulk data layer
+    BulkDataSnapshot,
+    BulkPropertyRecord,
+    BulkLLCRecord,
+    # Linking layer
+    EntityMarketProperty,
+    # AI layer
+    AIInference,
+    EmbeddingCache,
+    LLMCache,
 )
 
 __all__ = [
     'DatabaseManager',
     'Base',
-    # Core
-    'ContentSnapshot',
-    'RawFact',
-    'StructuredFact',
-    'FactEvent',
-    # Domain
-    'Property',
+    # Global
+    'Market',
     'Entity',
     'EntityRelationship',
+    'User',
+    # Events
+    'RawFact',
+    'Property',
     'Permit',
-    'PropertySale',
-    'LLCFormation',
-    'NewsArticle',
-    'CouncilMeeting',
     'CrimeReport',
+    'CouncilMeeting',
+    'NewsArticle',
+    # Business
+    'LLCFormation',
+    # Bulk
+    'BulkDataSnapshot',
+    'BulkPropertyRecord',
+    'BulkLLCRecord',
+    # Linking
+    'EntityMarketProperty',
     # AI
     'AIInference',
-    'InferenceRelationship',
-    'InferenceOutcome',
-    # Other
+    'EmbeddingCache',
     'LLMCache',
-    'ScraperRun',
-    'DataQualityCheck',
-    'IntelligenceAlert',
-    'User',
-    'APIKey',
 ]

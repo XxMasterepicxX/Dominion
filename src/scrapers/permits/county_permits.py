@@ -23,7 +23,7 @@ import structlog
 from patchright.async_api import async_playwright
 
 from ...config.schemas import MarketConfig
-from BypassV3.bypass import ReCaptchaV3Bypass
+from ..BypassV3.bypass import ReCaptchaV3Bypass
 
 logger = structlog.get_logger(__name__)
 
