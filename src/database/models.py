@@ -235,7 +235,7 @@ class Property(Base):
     property_address = Column(Text)
 
     # Location
-    coordinates = Column(Geometry('POINT', srid=4326))
+    # coordinates = Column(Geometry('POINT', srid=4326))  # Removed - requires PostGIS
     latitude = Column(Numeric(10, 8))
     longitude = Column(Numeric(11, 8))
 

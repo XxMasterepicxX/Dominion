@@ -210,7 +210,7 @@ class QPublicBrowserScraperFast:
         page_text = await page.evaluate('() => document.body.innerText')
 
         # Extract data using JavaScript (single evaluation for speed)
-        data = await page.evaluate('''() => {
+        data = await page.evaluate(r'''() => {
             const pageText = document.body.innerText;
 
             const findAfterLabel = (label) => {
@@ -230,13 +230,17 @@ class QPublicBrowserScraperFast:
             const parseCurrency = (str) => {
                 if (!str) return null;
                 const match = str.match(/\$?([\\d,]+)/);
-                return match ? parseFloat(match[1].replace(/,/g, '')) : null;
+                if (!match) return null;
+                const value = parseFloat(match[1].replace(/,/g, ''));
+                return isNaN(value) ? null : value;
             };
 
             const parseNum = (str) => {
                 if (!str) return null;
                 const match = str.match(/([\\d,]+(?:\\.\\d+)?)/);
-                return match ? parseFloat(match[1].replace(/,/g, '')) : null;
+                if (!match) return null;
+                const value = parseFloat(match[1].replace(/,/g, ''));
+                return isNaN(value) ? null : value;
             };
 
             const data = {};
@@ -254,7 +258,7 @@ class QPublicBrowserScraperFast:
                 data.owner_address = `${ownerSection[2].trim()}, ${ownerSection[3].trim()}`;
             }
 
-            data.market_value = parseCurrency(findAfterLabel('Just .Market. Value'));
+            data.market_value = parseCurrency(findAfterLabel('Just \\(Market\\) Value'));
             data.assessed_value = parseCurrency(findAfterLabel('Assessed Value'));
             data.taxable_value = parseCurrency(findAfterLabel('Taxable Value'));
             data.year_built = parseNum(findAfterLabel('Actual Year Built'));

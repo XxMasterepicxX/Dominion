@@ -77,6 +77,7 @@ class PermitRecord:
             'address': clean_value(self.address),
             'applicant': clean_value(self.applicant),
             'contractor': clean_value(self.contractor),
+            'application_date': clean_value(self.application_date),  # FIXED - was missing!
             'issue_date': clean_value(self.issue_date),
             'valuation': clean_value(self.valuation),
             'description': clean_value(self.description),

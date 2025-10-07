@@ -82,6 +82,13 @@ browser_data/
 *.json
 *.txt
 
+# Bulk data downloads (large files)
+CAMA/
+publicparcels/
+
+# Documentation (session notes, analysis reports)
+docs/
+
 # Docker
 .dockerignore
 

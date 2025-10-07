@@ -244,6 +244,26 @@ scrapers:
     schedule: "0 9 * * *"  # Daily 9 AM
 ```
 
+## 📚 Documentation
+
+### Current Session Reports (2025-10-07)
+- **[DOMINION_COMPLETE_VISION.md](DOMINION_COMPLETE_VISION.md)** - Complete product vision and roadmap
+- **[FINAL_SESSION_STATUS.md](FINAL_SESSION_STATUS.md)** - Latest session summary and status
+- **[AGENT_FIXES_COMPLETE.md](AGENT_FIXES_COMPLETE.md)** - Bug fixes and improvements
+- **[AGENT_QUALITY_ISSUES_FOUND.md](AGENT_QUALITY_ISSUES_FOUND.md)** - Quality analysis findings
+- **[HARD_TEST_FINDINGS.md](HARD_TEST_FINDINGS.md)** - Real investor scenario test results
+- **[IMPROVEMENTS_SHIPPED.md](IMPROVEMENTS_SHIPPED.md)** - Data validation improvements
+- **[REAL_VALUE_ASSESSMENT.md](REAL_VALUE_ASSESSMENT.md)** - Product-market fit analysis
+
+### Technical Documentation
+- **[docs/AI_AGENT_ARCHITECTURE.md](docs/AI_AGENT_ARCHITECTURE.md)** - Agent architecture overview
+- **[docs/AGENT_SETUP_GUIDE.md](docs/AGENT_SETUP_GUIDE.md)** - Setup and configuration
+- **[docs/architecture/](docs/architecture/)** - Database design, data flow, pipeline analysis
+
+### Historical Context
+- **[docs/archived_iterations/](docs/archived_iterations/)** - Previous iteration documentation
+- **[docs/archived_reports/](docs/archived_reports/)** - Historical test and analysis reports
+
 ## 📁 Project Structure
 
 ```
