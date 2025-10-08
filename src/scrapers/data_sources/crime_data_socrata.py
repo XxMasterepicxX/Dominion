@@ -65,17 +65,33 @@ class CrimeDataScraper:
             if not endpoint.endswith('.json'):
                 endpoint += '.json'
 
+            # No limit - get all records within date range
             params = {
-                '$limit': 10,
-                '$order': 'offense_date DESC'
+                '$limit': 50000,  # Socrata max, effectively no limit
+                '$order': 'offense_date DESC',
+                '$where': f"offense_date >= '{start_date.strftime('%Y-%m-%d')}'"
             }
 
-            response = requests.get(endpoint, params=params, timeout=30)
+            response = requests.get(endpoint, params=params, timeout=60)
             response.raise_for_status()
 
             data = response.json()
 
             if isinstance(data, list) and len(data) > 0:
+                # Extract coordinates from Socrata response
+                for record in data:
+                    # Socrata stores location in different formats
+                    if 'location' in record and isinstance(record['location'], dict):
+                        # Format: {"latitude": "29.123", "longitude": "-82.456"}
+                        record['latitude'] = record['location'].get('latitude')
+                        record['longitude'] = record['location'].get('longitude')
+                    elif 'location_1' in record and isinstance(record['location_1'], dict):
+                        # Format: {"coordinates": [-82.456, 29.123]}
+                        coords = record['location_1'].get('coordinates', [None, None])
+                        if coords and len(coords) >= 2:
+                            record['longitude'] = coords[0]
+                            record['latitude'] = coords[1]
+
                 logger.info("socrata_data_fetched", records_count=len(data))
                 return data
             else:
@@ -100,14 +116,12 @@ class CrimeDataScraper:
 
             if len(lines) > 1:
                 reader = csv.DictReader(StringIO(csv_data))
-                sample_records = []
-                for i, row in enumerate(reader):
-                    if i >= 10:
-                        break
-                    sample_records.append(row)
+                all_records = []
+                for row in reader:
+                    all_records.append(row)
 
-                logger.info("ckan_data_fetched", total_records=len(lines)-1, sample_count=len(sample_records))
-                return sample_records
+                logger.info("ckan_data_fetched", total_records=len(all_records))
+                return all_records
             else:
                 logger.warning("ckan_csv_empty")
                 return None

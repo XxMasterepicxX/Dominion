@@ -8,7 +8,7 @@ Research shows limiting to 8-10 tools max for best performance. We have 3.
 from typing import Dict, Any, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.intelligence.analyzers import PropertyAnalyzer, EntityAnalyzer, MarketAnalyzer
+from src.intelligence.analyzers import PropertyAnalyzer, EntityAnalyzer, MarketAnalyzer, PropertySearchAnalyzer
 from src.services.sunbiz_enrichment import SunbizEnrichmentService
 from src.services.qpublic_enrichment import QPublicEnrichmentService
 
@@ -140,6 +140,103 @@ TOOL_DEFINITIONS = [
             },
             "required": ["parcel_id"]
         }
+    },
+    {
+        "name": "search_properties",
+        "description": "Search and filter properties by criteria. Use this to find specific investment opportunities, vacant land, undervalued properties, or properties matching certain characteristics. CRITICAL: Use this when user asks 'what land should I buy' or 'find properties' or any search query.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "property_type": {
+                    "type": "string",
+                    "description": "Property type (e.g., 'VACANT', 'SINGLE FAMILY', 'CONDOMINIUM', 'COMMERCIAL')"
+                },
+                "max_price": {
+                    "type": "number",
+                    "description": "Maximum market value in dollars"
+                },
+                "min_price": {
+                    "type": "number",
+                    "description": "Minimum market value in dollars"
+                },
+                "min_lot_size": {
+                    "type": "number",
+                    "description": "Minimum lot size in acres"
+                },
+                "max_lot_size": {
+                    "type": "number",
+                    "description": "Maximum lot size in acres"
+                },
+                "zoning": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of acceptable zoning types (e.g., ['AGRICULTURE', 'RESIDENTIAL'])"
+                },
+                "city": {
+                    "type": "string",
+                    "description": "City name to filter by"
+                },
+                "area": {
+                    "type": "string",
+                    "description": "Geographic area from address (e.g., 'SW', 'NW 127th')"
+                },
+                "owner_type": {
+                    "type": "string",
+                    "description": "Filter by owner type: 'individual', 'company', or 'llc'"
+                },
+                "has_permits": {
+                    "type": "boolean",
+                    "description": "Filter properties with/without permits"
+                },
+                "recent_sale": {
+                    "type": "boolean",
+                    "description": "Filter recently sold properties (last 180 days)"
+                },
+                "exclude_owner": {
+                    "type": "string",
+                    "description": "Exclude properties owned by this entity (e.g., 'D R HORTON')"
+                },
+                "near_lat": {
+                    "type": "number",
+                    "description": "Latitude for geographic search"
+                },
+                "near_lng": {
+                    "type": "number",
+                    "description": "Longitude for geographic search"
+                },
+                "radius_miles": {
+                    "type": "number",
+                    "description": "Radius in miles for geographic search (use with near_lat/near_lng)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results to return (default: 20, max: 100)"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_entity_properties",
+        "description": "Get the actual list of properties owned by an entity (not just statistics). Use this when you need to see WHAT an entity owns, WHERE their properties are located, and identify patterns in their portfolio. Critical for 'follow the smart money' strategies.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "entity_name": {
+                    "type": "string",
+                    "description": "Entity/owner name (e.g., 'D R HORTON INC', 'ABC Development LLC')"
+                },
+                "property_type": {
+                    "type": "string",
+                    "description": "Optional: Filter by property type (e.g., 'VACANT' to see only their land holdings)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum properties to return (default: 100)"
+                }
+            },
+            "required": ["entity_name"]
+        }
     }
 ]
 
@@ -160,6 +257,7 @@ class AgentTools:
         self.property_analyzer = PropertyAnalyzer(session)
         self.entity_analyzer = EntityAnalyzer(session)
         self.market_analyzer = MarketAnalyzer(session)
+        self.property_search_analyzer = PropertySearchAnalyzer(session)
 
         # Enrichment services (initialized lazily)
         self._sunbiz_service = None
@@ -185,6 +283,10 @@ class AgentTools:
             return await self._analyze_entity(**parameters)
         elif tool_name == "analyze_market":
             return await self._analyze_market(**parameters)
+        elif tool_name == "search_properties":
+            return await self._search_properties(**parameters)
+        elif tool_name == "get_entity_properties":
+            return await self._get_entity_properties(**parameters)
         elif tool_name == "enrich_entity_sunbiz":
             return await self._enrich_entity_sunbiz(**parameters)
         elif tool_name == "enrich_property_qpublic":
@@ -392,6 +494,58 @@ class AgentTools:
             return {
                 'error': f'qPublic enrichment failed: {str(e)}'
             }
+
+    async def _search_properties(
+        self,
+        property_type: str = None,
+        max_price: float = None,
+        min_price: float = None,
+        min_lot_size: float = None,
+        max_lot_size: float = None,
+        zoning: list = None,
+        city: str = None,
+        area: str = None,
+        owner_type: str = None,
+        has_permits: bool = None,
+        recent_sale: bool = None,
+        exclude_owner: str = None,
+        near_lat: float = None,
+        near_lng: float = None,
+        radius_miles: float = None,
+        limit: int = 20
+    ) -> Dict[str, Any]:
+        """Execute PropertySearchAnalyzer.search()"""
+        return await self.property_search_analyzer.search(
+            property_type=property_type,
+            max_price=max_price,
+            min_price=min_price,
+            min_lot_size=min_lot_size,
+            max_lot_size=max_lot_size,
+            zoning=zoning,
+            city=city,
+            area=area,
+            owner_type=owner_type,
+            has_permits=has_permits,
+            recent_sale=recent_sale,
+            exclude_owner=exclude_owner,
+            near_lat=near_lat,
+            near_lng=near_lng,
+            radius_miles=radius_miles,
+            limit=limit
+        )
+
+    async def _get_entity_properties(
+        self,
+        entity_name: str,
+        property_type: str = None,
+        limit: int = 100
+    ) -> Dict[str, Any]:
+        """Execute PropertySearchAnalyzer.get_entity_properties()"""
+        return await self.property_search_analyzer.get_entity_properties(
+            entity_name=entity_name,
+            property_type=property_type,
+            limit=limit
+        )
 
     def get_tool_definitions(self) -> list:
         """Get tool definitions for Gemini function calling"""

@@ -7,6 +7,8 @@ Uses Gemini 2.0 Flash with manual tool configuration for better control.
 import os
 import json
 from typing import Dict, Any, List, Optional
+from decimal import Decimal
+from datetime import datetime, date
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 from pathlib import Path
@@ -31,6 +33,31 @@ from src.agent.prompts import SYSTEM_PROMPT
 from src.agent.context_builder import ContextBuilder
 
 logger = structlog.get_logger(__name__)
+
+
+def make_serializable(obj: Any) -> Any:
+    """
+    Convert objects to JSON-serializable format.
+
+    Handles:
+    - Decimal -> float
+    - datetime/date -> ISO string
+    - dict -> recursively serialize values
+    - list -> recursively serialize items
+    """
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: make_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [make_serializable(item) for item in obj]
+    elif hasattr(obj, '__dict__'):
+        # Handle custom objects
+        return make_serializable(obj.__dict__)
+    else:
+        return obj
 
 
 class DominionAgent:
@@ -582,12 +609,12 @@ CRITICAL:
                                     }}]
                                 })
 
-                                # Add function result
+                                # Add function result (serialize to handle Decimal, datetime, etc.)
                                 conversation.append({
                                     'role': 'user',
                                     'parts': [{'function_response': {
                                         'name': tool_call.name,
-                                        'response': result
+                                        'response': make_serializable(result)
                                     }}]
                                 })
 

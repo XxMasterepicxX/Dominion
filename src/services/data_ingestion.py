@@ -345,12 +345,16 @@ class DataIngestionService:
             project_description=content.get('description', '')
         )
 
-        # Link to property
+        # Link to property by address AND lookup parcel_id
         address = content.get('address', content.get('Address'))
         if address:
             property = await self._find_or_create_property(address, db_session)
             if property:
                 permit.property_id = property.id
+                # NEW: Also lookup parcel_id from bulk_property_records
+                parcel_id = await self._lookup_parcel_id_from_address(address, db_session)
+                if parcel_id:
+                    permit.parcel_id = parcel_id
 
         # Link to entities (applicant, contractor) with context
         source_context = {'source_type': 'city_permit', 'source_url': raw_fact.source_url}
@@ -416,12 +420,16 @@ class DataIngestionService:
             project_description=content.get('description', content.get('scope_of_work', ''))
         )
 
-        # Link to property
+        # Link to property by address AND lookup parcel_id
         address = content.get('address', content.get('Address'))
         if address:
             property = await self._find_or_create_property(address, db_session)
             if property:
                 permit.property_id = property.id
+                # NEW: Also lookup parcel_id from bulk_property_records
+                parcel_id = await self._lookup_parcel_id_from_address(address, db_session)
+                if parcel_id:
+                    permit.parcel_id = parcel_id
 
         # Link to entities (applicant, contractor) with context
         source_context = {'source_type': 'county_permit', 'source_url': raw_fact.source_url}
@@ -541,11 +549,18 @@ class DataIngestionService:
         db_session: AsyncSession,
         market_id
     ) -> List[NewsArticle]:
-        """Parse news article"""
+        """Parse news article with entity extraction"""
         # Parse datetime
         pub_date = self._parse_datetime(content.get('publication_date', content.get('pubDate', content.get('published'))))
         if not pub_date:
             pub_date = datetime.utcnow()  # Fallback to now if no date
+
+        # Extract mentioned entities from article text
+        mentioned_entities = await self._extract_mentioned_entities(
+            content.get('title', '') + ' ' + content.get('summary', '') + ' ' + content.get('article_text', ''),
+            market_id,
+            db_session
+        )
 
         article = NewsArticle(
             id=uuid4(),
@@ -557,8 +572,8 @@ class DataIngestionService:
             article_text=content.get('article_text', content.get('description', content.get('summary', ''))),  # Fixed: use 'article_text' not 'content'
             summary=content.get('summary'),
             url=content.get('link', content.get('url', '')),
-            # Optional advanced fields
-            mentioned_entities=content.get('mentioned_entities'),
+            # Entity extraction (NEW!)
+            mentioned_entities=mentioned_entities if mentioned_entities else None,
             topics=content.get('topics'),
             relevance_score=content.get('relevance_score')
         )
@@ -573,10 +588,21 @@ class DataIngestionService:
         db_session: AsyncSession,
         market_id
     ) -> List[CouncilMeeting]:
-        """Parse council meeting data"""
+        """Parse council meeting data with topic extraction"""
         meeting_date = self._parse_datetime(content.get('meeting_date', content.get('EventDate', content.get('start_time'))))
         if not meeting_date:
             meeting_date = datetime.utcnow()
+
+        # Extract topics from meeting summary
+        summary_text = content.get('summary', '') + ' ' + str(content.get('agenda_items', []))
+        topics = self._extract_topics(summary_text)
+
+        # Extract mentioned entities
+        mentioned_entities = await self._extract_mentioned_entities(
+            summary_text,
+            market_id,
+            db_session
+        )
 
         meeting = CouncilMeeting(
             id=uuid4(),
@@ -590,8 +616,8 @@ class DataIngestionService:
             minutes_text=content.get('extracted_text') or content.get('minutes_text'),  # Meeting minutes/transcript
             source_url=content.get('agenda_url') or content.get('source_url'),  # Main meeting URL
             summary=content.get('summary'),  # Optional summary
-            mentioned_entities=content.get('mentioned_entities'),  # UUID[] of mentioned entities
-            topics=content.get('topics')  # TEXT[] of extracted topics
+            mentioned_entities=mentioned_entities if mentioned_entities else None,  # UUID[] of mentioned entities (NEW!)
+            topics=topics if topics else None  # TEXT[] of extracted topics (NEW!)
         )
 
         db_session.add(meeting)
@@ -1175,3 +1201,135 @@ class DataIngestionService:
                 return None
 
         return None
+
+    # ==================== NEW LINKING METHODS ====================
+
+    async def _lookup_parcel_id_from_address(
+        self,
+        address: str,
+        db_session: AsyncSession
+    ) -> Optional[str]:
+        """
+        Lookup parcel_id from bulk_property_records by address
+
+        This enables permits to link directly to properties via parcel_id
+        """
+        try:
+            normalized_address = address.strip().upper()
+
+            result = await db_session.execute(
+                text("""
+                    SELECT parcel_id
+                    FROM bulk_property_records
+                    WHERE UPPER(site_address) = :address
+                    LIMIT 1
+                """),
+                {'address': normalized_address}
+            )
+
+            row = result.fetchone()
+            if row and row[0]:
+                logger.info(f"Found parcel_id for address '{address}': {row[0]}")
+                return row[0]
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Parcel lookup failed for '{address}': {e}")
+            return None
+
+    async def _extract_mentioned_entities(
+        self,
+        text: str,
+        market_id: str,
+        db_session: AsyncSession
+    ) -> Optional[List[str]]:
+        """
+        Extract mentioned entities from text using simple name matching
+
+        Returns list of entity UUIDs that were mentioned in the text
+        """
+        if not text or len(text.strip()) < 20:
+            return None
+
+        try:
+            # Get all known entities in this market with substantial names
+            result = await db_session.execute(
+                text("""
+                    SELECT DISTINCT e.id, e.name
+                    FROM entities e
+                    WHERE LENGTH(e.name) >= 10
+                      AND (
+                        :market_id = ANY(e.active_markets)
+                        OR e.first_seen_market_id = :market_id
+                      )
+                """),
+                {'market_id': market_id}
+            )
+
+            entities = list(result)
+            if not entities:
+                return None
+
+            # Simple substring matching
+            text_upper = text.upper()
+            mentioned = []
+
+            for entity_id, entity_name in entities:
+                if entity_name and entity_name.upper() in text_upper:
+                    mentioned.append(str(entity_id))
+
+            if mentioned:
+                logger.info(f"Extracted {len(mentioned)} entity mentions from text")
+                return mentioned
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Entity extraction failed: {e}")
+            return None
+
+    def _extract_topics(self, text: str) -> Optional[List[str]]:
+        """
+        Extract topics from text using keyword matching
+
+        Returns list of topic tags found in the text
+        """
+        if not text or len(text.strip()) < 20:
+            return None
+
+        topics = []
+        text_lower = text.lower()
+
+        # Development topics
+        if any(word in text_lower for word in ['zoning', 'rezoning', 'rezone']):
+            topics.append('zoning')
+        if any(word in text_lower for word in ['development', 'developer', 'building']):
+            topics.append('development')
+        if any(word in text_lower for word in ['permit', 'variance', 'special exception']):
+            topics.append('permits')
+
+        # Infrastructure topics
+        if any(word in text_lower for word in ['road', 'highway', 'street', 'infrastructure']):
+            topics.append('infrastructure')
+        if any(word in text_lower for word in ['water', 'sewer', 'utility', 'utilities']):
+            topics.append('utilities')
+
+        # Housing topics
+        if any(word in text_lower for word in ['affordable housing', 'housing development', 'apartment']):
+            topics.append('housing')
+        if any(word in text_lower for word in ['subdivision', 'plat']):
+            topics.append('subdivision')
+
+        # Economic topics
+        if any(word in text_lower for word in ['budget', 'funding', 'tax', 'revenue']):
+            topics.append('budget')
+        if any(word in text_lower for word in ['business', 'economic development', 'commerce']):
+            topics.append('economic_development')
+
+        # Environmental topics
+        if any(word in text_lower for word in ['environmental', 'wetland', 'conservation']):
+            topics.append('environmental')
+
+        # Return unique topics
+        return list(set(topics)) if topics else None

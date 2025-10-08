@@ -288,7 +288,7 @@ async def run_council_scraper(market_config, months_back=3):
         return {'total': 0, 'ingested': 0, 'error': str(e)}
 
 
-async def run_sunbiz_scraper(market_config, limit=100):
+async def run_sunbiz_scraper(market_config, limit=None):
     """Run Sunbiz scraper (SYNC)"""
     print("\n" + "=" * 80)
     print("6. SUNBIZ (Florida Business Entities)")
@@ -308,8 +308,8 @@ async def run_sunbiz_scraper(market_config, limit=100):
         # Get all formations
         formations = all_data.get('formations', [])
 
-        # Limit results
-        entities = formations[:limit]
+        # NO LIMIT - get all entities
+        entities = formations[:limit] if limit else formations
 
         if not entities:
             return {'total': 0, 'ingested': 0}
@@ -379,7 +379,7 @@ async def main():
     results['crime'] = await run_crime_scraper(market_config, days_back=30)
     results['news'] = await run_news_scraper(market_config)
     results['council'] = await run_council_scraper(market_config, months_back=3)
-    results['sunbiz'] = await run_sunbiz_scraper(market_config, limit=100)
+    results['sunbiz'] = await run_sunbiz_scraper(market_config, limit=None)  # No limit!
 
     # Final summary
     print("\n" + "=" * 80)

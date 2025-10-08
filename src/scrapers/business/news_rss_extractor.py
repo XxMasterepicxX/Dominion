@@ -51,13 +51,14 @@ class NewsRSSScraper:
                     logger.warning("feed_empty", feed=feed_name)
                     continue
 
-                for entry in feed.entries[:5]:
+                # Get all entries from feed (no limit)
+                for entry in feed.entries:
                     article = {
                         'source': feed_name,
                         'title': entry.get('title', 'No title'),
                         'link': entry.get('link', ''),
                         'published': entry.get('published', entry.get('updated', 'Unknown date')),
-                        'summary': entry.get('summary', '')[:200] + '...' if entry.get('summary') else ''
+                        'summary': entry.get('summary', '')[:500] + '...' if entry.get('summary') else ''  # Increased from 200 to 500
                     }
                     all_articles.append(article)
 
