@@ -377,7 +377,6 @@ class CrimeReport(Base):
 
     # Location
     incident_address = Column(Text)
-    coordinates = Column(Geometry('POINT', srid=4326))
     latitude = Column(Numeric(10, 8))
     longitude = Column(Numeric(11, 8))
 

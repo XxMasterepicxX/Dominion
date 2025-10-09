@@ -228,7 +228,10 @@ class CityPermitsScraper:
                 await page.wait_for_timeout(2000)
 
                 page_text = await page.text_content("body")
-                has_permits = any(pattern in page_text for pattern in ['B25-', 'E25-', 'M25-', 'P25-', 'B24-'])
+                # Use generic patterns that work for any year (same as county permits)
+                has_permits = any(pattern in page_text for pattern in [
+                    'BLD', 'ELE', 'PLU', 'MEC', 'Permit', 'Application'
+                ])
 
                 if not has_permits:
                     logger.warning("no_permits_found_in_results")

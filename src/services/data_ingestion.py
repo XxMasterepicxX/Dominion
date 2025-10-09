@@ -311,7 +311,8 @@ class DataIngestionService:
         lat = self._parse_float(content.get('latitude'))
         lon = self._parse_float(content.get('longitude'))
         if lat and lon:
-            crime.location_geometry = func.ST_SetSRID(func.ST_MakePoint(lon, lat), 4326)
+            crime.latitude = lat
+            crime.longitude = lon
 
         # Try to link to property by address (basic implementation)
         address = content.get('address')

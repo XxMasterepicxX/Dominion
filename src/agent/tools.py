@@ -17,7 +17,35 @@ from src.services.qpublic_enrichment import QPublicEnrichmentService
 TOOL_DEFINITIONS = [
     {
         "name": "analyze_property",
-        "description": "Get comprehensive property intelligence including location, valuation, ownership, and neighborhood context. Use this to understand a specific property's details.",
+        "description": """Get comprehensive property intelligence for a specific address or parcel.
+
+WHEN TO USE: User asks about a specific property (e.g., "Should I buy 123 Main St?")
+
+RETURNS: Complete property data including:
+- property: Core details (address, market_value, lot_size_acres, property_type, zoning, year_built)
+- owner: Current owner info (entity_name, entity_type, mailing_address)
+  * CRITICAL: Check entity_name to verify ownership - don't recommend properties owned by the developer you're following!
+- owner_portfolio: Portfolio stats (total_properties, total_value, recent_acquisitions)
+  * KEY: Large portfolio indicates sophisticated investor (FOLLOW SMART MONEY signal)
+  * KEY: Multiple recent acquisitions indicates ACTIVE BUYER (bullish market signal)
+- sales_history: Full transaction history (all prior sales, dates, prices)
+  * Use to identify: recent flips, price trends, ownership stability
+  * Red flags: Multiple sales in short period, declining prices, suspicious transactions
+- permits: Building permits at property and in owner's portfolio (construction activity)
+- crime: Crime risk score (1-10, lower is better) and incidents nearby
+- neighborhood: Comparable properties and avg_market_value
+  * Use avg_market_value to calculate if property is undervalued
+- news: Media mentions of property or area
+- council: City council activity mentions
+
+HOW TO USE THE DATA:
+1. VERIFY OWNERSHIP: Check owner.entity_name - if it's the developer you're following, EXCLUDE it
+2. Check owner_portfolio.total_properties - Large portfolios indicate sophisticated investors
+3. Review sales_history - Look for red flags (flips, price drops) or positive signals (long-term hold)
+4. Compare property.market_value to neighborhood.avg_market_value for valuation
+5. Check crime.risk_score on 1-10 scale (lower is better, higher is worse)
+6. Review permits for development activity signals
+""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -43,7 +71,34 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "analyze_entity",
-        "description": "Get owner/investor intelligence including portfolio size, activity patterns, property preferences, and cross-market presence. Use this to understand who owns a property and their sophistication level.",
+        "description": """Get owner/investor intelligence and portfolio analysis.
+
+WHEN TO USE:
+1. User asks "What is [ENTITY] buying?" or "Follow [DEVELOPER]"
+2. After analyze_property shows owner with 10+ properties (want to understand their strategy)
+3. Researching developer patterns or assemblage plays
+
+RETURNS: Comprehensive entity statistics including:
+- entity_id: Unique identifier
+- entity_name: Normalized name
+- entity_type: Classification (person, company, llc, institutional)
+- portfolio: Total properties owned, total market value, average property value
+  * INTERPRETATION: Large portfolio (~20+ properties) = typically sophisticated investor (FOLLOW SMART MONEY)
+  * INTERPRETATION: Medium (~6-20) = active investor, Small (~1-5) = individual investor
+  * Note: Adjust for market context - 10 may be "large" in small markets, 30 may be "medium" in metros
+- activity: Recent acquisitions timeline (last 180 days)
+  * INTERPRETATION: Multiple recent acquisitions (3+) = ACTIVE BUYER (very bullish signal)
+  * INTERPRETATION: No recent acquisitions = passive holder (neutral signal)
+  * Note: Compare to investor's historical pace - what's "active" varies by investor
+- property_preferences: Types they buy (VACANT, SINGLE FAMILY, COMMERCIAL, etc.)
+- markets: Cross-market presence (if operating in multiple cities)
+- geographic_clustering: Where their properties are concentrated
+
+TOOL CALLING STRATEGY:
+1. Call analyze_entity() FIRST to get statistics
+2. Then call get_entity_properties() to get actual property list for pattern analysis
+3. DO NOT call analyze_property() for each property in portfolio (wasteful)
+""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -143,7 +198,58 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "search_properties",
-        "description": "Search and filter properties by criteria. Use this to find specific investment opportunities, vacant land, undervalued properties, or properties matching certain characteristics. CRITICAL: Use this when user asks 'what land should I buy' or 'find properties' or any search query.",
+        "description": """Search and filter properties by multiple criteria to find investment opportunities.
+
+WHEN TO USE:
+- User asks "Where should I buy?" or "Find properties matching [criteria]"
+- After analyze_entity() reveals what property types successful investors are buying
+- To find specific property types based on market analysis
+
+RETURNS: List of properties matching filters, each with:
+- property_id: Unique identifier
+- parcel_id: Parcel ID (use this for detailed analysis)
+- site_address: Full address (use this to identify property to user)
+- market_value: Current assessed value
+- lot_size_acres: Lot size
+- property_type: Classification (VACANT, SINGLE FAMILY, COMMERCIAL, MULTI-FAMILY, CONDOMINIUM, etc.)
+- zoning: Zoning code
+- owner_name: Current owner
+
+CRITICAL: PROPERTY TYPE SELECTION
+- DO NOT default to property_type='VACANT' unless:
+  1. User explicitly asks for land/vacant property, OR
+  2. analyze_entity() showed successful investors prefer VACANT (from property_preferences)
+- Available property types: VACANT, SINGLE FAMILY, MULTI-FAMILY, CONDOMINIUM, COMMERCIAL, INDUSTRIAL, etc.
+- Let the data and user intent drive property_type selection
+- If searching for "something to buy", consider ALL types or match what smart money buys
+
+FILTERS FOR VACANT LAND (only when searching for land):
+- property_type='VACANT' - Specify when searching for land
+- owner_type='individual' - Consider private owners (often more motivated sellers than corporations)
+- EXCLUDE if not viable: Government ownership (COUNTY, STATE, DISTRICT), conservation land, extreme outliers
+
+LOT SIZE GUIDANCE (use professional judgment):
+- Consider user's intent and budget
+- Don't arbitrarily limit lot size unless user specifies
+- Tiny lots (<0.25 acres): May be unbuildable or have issues - investigate carefully
+- Large lots (>100 acres): May be agricultural, timber, or institutional - verify viability
+- Use min/max_lot_size filters ONLY if they make sense for the specific query
+- Example: "$50k budget" doesn't automatically mean "limit to 10 acres" - could get 50 acres for that price
+
+USAGE PATTERN:
+1. Call search_properties() with filters appropriate to user's query
+2. Get list of matching properties (adjust limit based on query complexity and data needs)
+3. Call analyze_property() for most promising candidates only (don't analyze all results - focus on quality over quantity)
+4. Return specific recommendations with addresses
+
+EXAMPLES (illustrative only - adapt to user's actual query):
+- User asks for vacant land: search_properties(property_type='VACANT', max_price=50000, owner_type='individual')
+- User asks for single-family homes: search_properties(property_type='SINGLE FAMILY', max_price=200000)
+- User asks for duplexes/multifamily: search_properties(property_type='MULTI-FAMILY', max_price=300000)
+- User asks for commercial properties: search_properties(property_type='COMMERCIAL', max_price=500000)
+- User asks for ANY property type: search_properties(max_price=100000)
+  (When no property_type specified, results include all types - analyze to find best opportunities)
+""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -210,7 +316,7 @@ TOOL_DEFINITIONS = [
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum results to return (default: 20, max: 100)"
+                    "description": "Maximum results to return (default: 50). Use 30-50 for general searches to ensure broad evaluation, smaller for targeted searches."
                 }
             },
             "required": []
@@ -218,7 +324,38 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "get_entity_properties",
-        "description": "Get the actual list of properties owned by an entity (not just statistics). Use this when you need to see WHAT an entity owns, WHERE their properties are located, and identify patterns in their portfolio. Critical for 'follow the smart money' strategies.",
+        "description": """Get the actual list of properties owned by an entity (addresses, not just stats).
+
+WHEN TO USE:
+1. After analyze_entity() shows this is a sophisticated investor (20+ properties)
+2. User asks to "follow" a developer or identify assemblage patterns
+3. Need to identify gap parcels or geographic clustering
+
+RETURNS: List of properties owned by entity, each with:
+- site_address: Full address (use for geographic pattern analysis)
+- parcel_id: Parcel ID
+- property_type: Type (VACANT land is key for development plays)
+- market_value: Value
+- purchase_date: When acquired (recent = active strategy)
+- lot_size_acres: Size
+
+DIFFERENCE FROM analyze_entity:
+- analyze_entity: Statistics (total count, total value, activity trends)
+- get_entity_properties: Actual property list with addresses
+
+GEOGRAPHIC PATTERN ANALYSIS:
+1. Extract street names from addresses
+2. Look for clustering: Multiple properties on same street or block
+3. Identify contiguous parcels (adjacent addresses, e.g., 101, 103, 105 Main St)
+4. Find gaps: Missing addresses between owned parcels (assemblage opportunities)
+5. Predict next acquisitions: Properties needed to complete the block
+
+TOOL EFFICIENCY:
+- Call analyze_entity() FIRST (get stats in 1 call)
+- Call get_entity_properties() SECOND (get addresses for pattern analysis)
+- Analyze patterns from the address data WITHOUT calling analyze_property() for each
+- Call analyze_property() ONLY for the most promising gap parcels you want to recommend (focus on quality)
+""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -360,7 +497,7 @@ class AgentTools:
             property_id=property_id,
             include_ownership=True,
             include_neighborhood=include_neighborhood,
-            include_history=False,  # Not needed for current analysis
+            include_history=True,  # Include full sales history for ownership verification and trend analysis
             neighborhood_radius_miles=neighborhood_radius_miles
         )
 
@@ -512,7 +649,7 @@ class AgentTools:
         near_lat: float = None,
         near_lng: float = None,
         radius_miles: float = None,
-        limit: int = 20
+        limit: int = 50
     ) -> Dict[str, Any]:
         """Execute PropertySearchAnalyzer.search()"""
         return await self.property_search_analyzer.search(

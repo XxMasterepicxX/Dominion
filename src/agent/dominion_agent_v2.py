@@ -1,11 +1,14 @@
 """
 Dominion AI Property Analysis Agent - Simplified Version
 
-Uses Gemini 2.0 Flash with manual tool configuration for better control.
+Uses Gemini 2.5 Pro with dynamic thinking, tool calling, and grounding.
+Optimized for complex real estate analysis with no hardcoded limits.
 """
 
 import os
 import json
+import re
+import asyncio
 from typing import Dict, Any, List, Optional
 from decimal import Decimal
 from datetime import datetime, date
@@ -30,7 +33,7 @@ except ImportError:
 
 from src.agent.tools import AgentTools, TOOL_DEFINITIONS
 from src.agent.prompts import SYSTEM_PROMPT
-from src.agent.context_builder import ContextBuilder
+from src.config import CurrentMarket
 
 logger = structlog.get_logger(__name__)
 
@@ -73,7 +76,6 @@ class DominionAgent:
 
         self.session = session
         self.tools = AgentTools(session)
-        self.context_builder = ContextBuilder(session)
 
         # Configure Gemini (new SDK)
         self.client = genai.Client(api_key=self.api_key)
@@ -94,8 +96,6 @@ class DominionAgent:
         - Call search_properties() for strategic "where to buy" questions
         - Call get_entity_properties() to analyze buyer patterns
 
-        No hardcoded query classification - agent is smart enough to choose.
-
         Args:
             user_query: User's question (any format - agent will interpret)
 
@@ -104,199 +104,180 @@ class DominionAgent:
         """
         logger.info("agent_analysis_started", query=user_query)
 
-        # Minimal context - let agent decide what tools to use
-        context = {
-            'user_query': user_query,
-            'market': CurrentMarket.get_config().market.name,
-            'note': 'Use tools to gather data. For specific properties, call analyze_property(address). For strategic queries, use search_properties() or get_entity_properties().'
-        }
+        # Classify query type to determine if tools are needed
+        is_strategic_query = self._classify_query(user_query)
 
-        # Build analysis prompt (QUERY AT END per research best practices)
-        prompt = self._build_analysis_prompt(context, user_query)
+        # Build analysis prompt
+        prompt = self._build_analysis_prompt(user_query)
 
         logger.info("sending_to_gemini",
-                   context_size=len(json.dumps(context, default=str)),
+                   query_type='strategic' if is_strategic_query else 'specific',
                    thinking_mode=True)
 
         try:
-            # VISION: AI Investment Partner that predicts with 80%+ accuracy
-            # GOAL: BEST possible analysis through deep reasoning
-            # ACCEPT: 5-10pt variance is NORMAL for complex real estate decisions
-            #
-            # We want the agent to:
-            # 1. Think deeply about every property (not rush to conclusion)
-            # 2. Consider multiple scenarios and risk factors
-            # 3. Learn patterns from reasoning (capture thoughts)
-            # 4. Provide accurate predictions (not just consistent scores)
-            #
-            # Use maximum thinking for ALL queries
-
             # Configure for strategic vs property-specific queries
             if is_strategic_query:
                 # Strategic query: Enable autonomous tool calling
+                # NOTE: Grounding (Google Search) is incompatible with function calling in Gemini API
+                # For now, prioritize database tools which provide comprehensive real estate data
+
                 config = types.GenerateContentConfig(
                     system_instruction=self.system_instruction,
                     thinking_config=types.ThinkingConfig(
-                        thinking_budget=-1,  # MAXIMUM dynamic thinking
-                        include_thoughts=True
+                        thinking_budget=-1,  # Dynamic: adapts to query complexity
+                        include_thoughts=True  # Capture reasoning for learning
                     ),
-                    temperature=0.3,
-                    max_output_tokens=8192,
-                    tools=self._convert_tools_to_gemini_format(),  # Enable tools
+                    temperature=0.7,  # Optimal for analytical reasoning (Google 2025 best practice)
+                    # No max_output_tokens: Let model write comprehensive analysis (2.5 Pro supports 64k)
+                    tools=self._convert_tools_to_gemini_format(),
                     tool_config=types.ToolConfig(
                         function_calling_config=types.FunctionCallingConfig(
-                            mode='AUTO'  # Let Gemini decide when to call tools
+                            mode='AUTO'  # Autonomous tool selection
                         )
                     )
                 )
-                logger.info("using_autonomous_tool_calling",
-                           temperature=0.3,
-                           thinking="dynamic_unlimited",
-                           tools_enabled=len(TOOL_DEFINITIONS),
-                           mode="AUTO")
+                logger.info("strategic_query_config",
+                           temperature=0.7,
+                           thinking_budget="dynamic",
+                           output_tokens="unlimited",
+                           tools_enabled=len(TOOL_DEFINITIONS))
 
                 # Execute with tool calling
                 result = await self._execute_with_tools(prompt, config)
 
             else:
-                # Property-specific query: Pre-loaded context, no tools needed
+                # Property-specific query: May still need tools for data lookup
                 config = types.GenerateContentConfig(
                     system_instruction=self.system_instruction,
                     thinking_config=types.ThinkingConfig(
-                        thinking_budget=-1,  # MAXIMUM dynamic thinking for best analysis
-                        include_thoughts=True  # Capture reasoning for pattern learning
+                        thinking_budget=-1,  # Dynamic thinking for best analysis
+                        include_thoughts=True  # Capture reasoning
                     ),
-                    temperature=0.3,  # Balanced: thoughtful but focused
-                    max_output_tokens=8192
+                    temperature=0.7,  # Analytical depth for complex real estate decisions
+                    # No max_output_tokens: Allow comprehensive property analysis
+                    tools=self._convert_tools_to_gemini_format(),
+                    tool_config=types.ToolConfig(
+                        function_calling_config=types.FunctionCallingConfig(
+                            mode='AUTO'
+                        )
+                    )
                 )
-                logger.info("using_deep_analysis_mode",
-                           temperature=0.3,
-                           thinking="dynamic_unlimited",
-                           goal="best_prediction_accuracy")
+                logger.info("property_analysis_config",
+                           temperature=0.7,
+                           thinking_budget="dynamic",
+                           output_tokens="unlimited")
 
-                # Send prompt with appropriate config
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=prompt,
-                    config=config
-                )
-
-                # Parse response
-                result = self._parse_response(response)
+                # Execute with tool calling (tools available for both query types)
+                result = await self._execute_with_tools(prompt, config)
 
             # Add metadata
-            if is_strategic_query:
-                result['query_type'] = 'strategic'
-                result['query'] = user_query
-            else:
-                result['property_analyzed'] = context['property']['site_address']
-                result['context_provided'] = {
-                    'portfolio_size': len(context['owner_portfolio']),
-                    'recent_activity': len(context['owner_activity']),
-                    'permits': len(context['permits'].get('at_property', [])),
-                    'crime_incidents': len(context['crime']),
-                    'council_mentions': len(context['council']),
-                    'news_articles': len(context['news'])
-                }
+            result['query_type'] = 'strategic' if is_strategic_query else 'specific'
+            result['query'] = user_query
 
             logger.info("agent_analysis_completed",
+                       query_type=result['query_type'],
                        recommendation=result.get('recommendation'),
-                       probability=result.get('deal_success_probability'))
+                       probability=result.get('deal_success_probability'),
+                       tools_called=len(result.get('tool_calls_made', [])))
 
             return result
 
         except Exception as e:
-            logger.error("analysis_failed", error=str(e))
+            logger.error("analysis_failed", error=str(e), query=user_query)
             return {
                 'error': f'Analysis failed: {str(e)}',
-                'query': user_query
+                'query': user_query,
+                'recommendation': 'ERROR',
+                'deal_success_probability': 0,
+                'confidence': 'none'
             }
 
-    def _build_analysis_prompt(self, context: Dict[str, Any], user_query: str) -> str:
+    def _classify_query(self, user_query: str) -> bool:
         """
-        Build analysis prompt - agent autonomously decides what tools to use.
+        Classify if query is strategic (needs extensive tool usage) vs specific (targeted analysis).
 
-        No hardcoded query classification - agent is smart enough to:
-        - Recognize specific property questions and call analyze_property()
-        - Recognize strategic queries and call search_properties()
-        - Analyze patterns and call get_entity_properties()
+        Strategic queries: "Where should I buy?", "Find something to invest in", "What is [ENTITY] buying?"
+        Specific queries: "Should I buy [ADDRESS]?", "Analyze [ADDRESS]"
+
+        Args:
+            user_query: User's natural language query
+
+        Returns:
+            True if strategic query, False if specific property query
         """
+        query_lower = user_query.lower()
 
-        prompt = f"""
-┌─────────────────────────────────────────────────────────────┐
-│ DOMINION REAL ESTATE INVESTMENT ADVISOR                    │
-│ Market: {context.get('market', 'Unknown')}                  │
-└─────────────────────────────────────────────────────────────┘
+        # Strategic query patterns (general investment search, entity research, pattern analysis)
+        strategic_patterns = [
+            'where should i buy',
+            'what should i buy',
+            'find properties',
+            'find something',
+            'find a property',
+            'find an area',
+            'search for',
+            'what is buying',
+            'what are they buying',
+            'what did they buy',
+            'follow the',
+            'follow smart money',
+            'assemblage',
+            'gap parcel',
+            'developer pattern',
+            'what opportunities',
+            'where to invest',
+            'best area to buy'
+        ]
 
-USER QUERY: {user_query}
+        # Check for strategic patterns
+        if any(pattern in query_lower for pattern in strategic_patterns):
+            return True
 
-=== YOUR TOOLS ===
+        # Check for specific address pattern (property-specific query)
+        address_pattern = r'\d+\s+[A-Za-z\s]+(?:St(?:reet)?|Ave(?:nue)?|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place)'
+        if re.search(address_pattern, user_query, re.IGNORECASE):
+            return False
 
-You have access to these tools to gather data:
+        # Default to strategic (safer to enable tools)
+        return True
 
-1. **analyze_property(address)** - Get complete property analysis
-   Returns: Property details, owner portfolio, permits, crime, news, council activity
+    def _build_analysis_prompt(self, user_query: str) -> str:
+        """
+        Build dynamic analysis prompt based on query.
+        No hardcoded text - agent decides tool usage autonomously.
 
-2. **search_properties(filters)** - Find properties by criteria
-   Filters: property_type, max_price, min_lot_size, zoning, city, owner_type, etc.
-   Returns: List of matching properties with addresses and parcel IDs
+        Args:
+            user_query: User's natural language query
 
-3. **get_entity_properties(entity_name, property_type)** - Get entity's portfolio
-   Returns: All properties owned by entity with addresses and purchase dates
+        Returns:
+            Formatted prompt for Gemini
+        """
+        market_name = CurrentMarket.get_name()
 
-4. **analyze_entity(entity_name)** - Get entity statistics
-   Returns: Portfolio size, acquisition patterns, activity trends
+        # Build prompt dynamically
+        prompt = f"""Real Estate Analysis Request
 
-5. **analyze_market()** - Get market overview
-   Returns: Market trends, active buyers, development patterns
+Market: {market_name}
+Query: {user_query}
 
-=== YOUR TASK ===
+Instructions:
+- Use available tools to gather data
+- Think through the analysis step by step
+- Cite specific evidence from tool responses
+- Return structured JSON with recommendation and reasoning
+- For strategic queries, provide specific addresses and parcel IDs (not generic examples)
 
-**Autonomously decide which tools to use based on the query:**
-
-**If user asks about a specific property** (e.g., "Should I buy 123 Main St?"):
-1. Call analyze_property("123 Main St")
-2. Analyze the returned data
-3. Return recommendation with deal_success_probability score
-
-**If user asks WHERE to buy** (e.g., "What land should I buy?"):
-1. Call analyze_market() to understand current trends
-2. Call search_properties() to find opportunities
-3. Call get_entity_properties() to see what smart money is buying
-4. Return SPECIFIC addresses and parcel IDs
-
-**If user asks about an entity/developer** (e.g., "What is D.R. Horton buying?"):
-1. Call analyze_entity("D R HORTON")
-2. Call get_entity_properties("D R HORTON")
-3. Analyze geographic clustering
-4. Return pattern analysis and gap parcels
-
-=== OUTPUT FORMAT ===
-
-Return JSON with:
+Output Format:
 {{
   "recommendation": "BUY/AVOID/INVESTIGATE",
   "deal_success_probability": 0-100,
   "confidence": "high/medium/low",
-  "reasoning": "Cite specific numbers and data",
+  "reasoning": "Evidence-based analysis",
   "recommendations": [
-    {{
-      "address": "SPECIFIC ADDRESS",
-      "parcel_id": "PARCEL-ID",
-      "priority": "HIGH/MEDIUM/LOW",
-      "reasoning": "Why this property"
-    }}
-  ],
-  "tool_calls_made": ["List tools you called"]
+    {{"address": "Specific address", "parcel_id": "ID", "priority": "HIGH/MEDIUM/LOW", "reasoning": "Why"}}
+  ]
 }}
-
-CRITICAL RULES:
-- ALWAYS call tools to get fresh data - don't guess
-- For strategic queries, return SPECIFIC addresses, not hypothetical examples
-- Cite actual numbers from tool responses
-- If you don't have data, call the appropriate tool to get it
 """
-
         return prompt
 
     def _parse_response(self, response) -> Dict[str, Any]:
@@ -333,16 +314,35 @@ CRITICAL RULES:
 
         # Try to parse as JSON
         try:
-            # Look for JSON in response
-            import re
+            # Try parsing entire response first
+            result = json.loads(response_text.strip())
+            if thoughts_text:
+                result['model_thoughts'] = thoughts_text
+            return result
+        except json.JSONDecodeError:
+            # Try to find JSON in code block (```json ... ```)
+            code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+            if code_block_match:
+                try:
+                    result = json.loads(code_block_match.group(1))
+                    if thoughts_text:
+                        result['model_thoughts'] = thoughts_text
+                    return result
+                except json.JSONDecodeError:
+                    pass
+
+            # Try to find any JSON object (use simpler greedy match as last resort)
             json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if json_match:
-                result = json.loads(json_match.group())
-                if thoughts_text:
-                    result['model_thoughts'] = thoughts_text
-                return result
+                try:
+                    result = json.loads(json_match.group())
+                    if thoughts_text:
+                        result['model_thoughts'] = thoughts_text
+                    return result
+                except json.JSONDecodeError as e:
+                    logger.warning("json_parse_failed", error=str(e), response_preview=response_text[:200])
         except Exception as e:
-            logger.warning("json_parse_failed", error=str(e))
+            logger.warning("json_extraction_failed", error=str(e))
 
         # Fallback: return raw response
         return {
@@ -486,6 +486,12 @@ CRITICAL RULES:
                         result = self._parse_response(response)
                         result['tool_calls_made'] = tool_calls_made
                         return result
+
+                    # Rate limit: Wait 30 seconds between iterations (2 requests/minute free tier)
+                    # TODO: Remove this delay when upgraded to paid tier
+                    if iteration < max_iterations - 1:  # Don't sleep on last iteration
+                        logger.info("rate_limit_delay", seconds=30, reason="gemini_free_tier")
+                        await asyncio.sleep(30)
 
         # Max iterations reached
         logger.warning("max_tool_iterations_reached", iterations=max_iterations)
