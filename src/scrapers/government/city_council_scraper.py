@@ -66,6 +66,8 @@ class MeetingRecord:
             'minutes_url': self.minutes_url,
             'video_url': self.video_url,
             'is_cancelled': self.is_cancelled,
+            'agenda_items': self.agenda_items,  # FIXED: Actually include the items!
+            'extracted_text': self.extracted_text,  # FIXED: Actually include the text!
             'agenda_items_count': len(self.agenda_items),
             'text_length': len(self.extracted_text),
         }
@@ -183,10 +185,18 @@ class CouncilScraper:
                     if meeting and start_date <= self._parse_escribe_date(meeting.meeting_date) <= end_date:
                         meetings.append(meeting)
 
+                        # Extract content from PDFs
                         if meeting.agenda_url and meeting.agenda_url.endswith('.pdf'):
                             self._extract_pdf_text(meeting, 'agenda')
+                        # NEW: Extract content from HTML pages
+                        elif meeting.agenda_url:
+                            self._extract_html_content(meeting, 'agenda')
+
                         if meeting.minutes_url and meeting.minutes_url.endswith('.pdf'):
                             self._extract_pdf_text(meeting, 'minutes')
+                        # NEW: Extract content from HTML pages
+                        elif meeting.minutes_url:
+                            self._extract_html_content(meeting, 'minutes')
 
                 except Exception as e:
                     logger.warning("meeting_parse_failed", error=str(e))
@@ -280,6 +290,98 @@ class CouncilScraper:
             return datetime.fromtimestamp(timestamp)
 
         return None
+
+    def _extract_html_content(self, meeting: MeetingRecord, doc_type: str):
+        """
+        Extract content from HTML meeting pages using simple parsing.
+
+        Based on testing, we found eScribe pages contain extractable content
+        in the <article> tag and raw text, even though they use JavaScript.
+
+        This method uses BeautifulSoup to extract:
+        - Agenda items
+        - Recommendations
+        - Resolutions
+        - Full meeting text
+        """
+        from bs4 import BeautifulSoup
+
+        try:
+            url = meeting.agenda_url if doc_type == 'agenda' else meeting.minutes_url
+            if not url:
+                return
+
+            logger.info(f"extracting_html_content_{doc_type}", url=url[:80])
+
+            response = self.session.get(url, timeout=30, verify=self.verify_ssl)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Extract from <article> tag (most reliable)
+            article = soup.find('article')
+            if article:
+                # Get all text
+                text = article.get_text(separator='\n', strip=True)
+
+                # Store extracted text
+                if meeting.extracted_text:
+                    meeting.extracted_text += f"\n\n--- {doc_type.upper()} ---\n\n" + text
+                else:
+                    meeting.extracted_text = text
+
+                # Extract agenda items
+                agenda_items = self._parse_agenda_items(text)
+                if agenda_items:
+                    meeting.agenda_items.extend(agenda_items)
+
+                logger.info(f"html_content_extracted_{doc_type}",
+                           text_length=len(text),
+                           agenda_items=len(agenda_items))
+            else:
+                logger.warning(f"no_article_tag_{doc_type}", url=url[:80])
+
+        except Exception as e:
+            logger.error(f"html_extraction_failed_{doc_type}", error=str(e), url=url[:80] if 'url' in locals() else 'unknown')
+
+    def _parse_agenda_items(self, text: str) -> list:
+        """Parse agenda items from meeting text"""
+        items = []
+
+        # Pattern 1: Numbered items (1., 2., 3.)
+        numbered = re.findall(r'\n(\d+\..+?)(?=\n\d+\.|\nRecommendation:|\Z)', text, re.DOTALL)
+        items.extend([item.strip() for item in numbered if len(item.strip()) > 10])
+
+        # Pattern 2: Standard agenda keywords
+        keywords = [
+            'CALL TO ORDER',
+            'ROLL CALL',
+            'APPROVAL OF MINUTES',
+            'APPROVAL OF THE AGENDA',
+            'PUBLIC COMMENT',
+            'NEW BUSINESS',
+            'OLD BUSINESS',
+            'ADJOURNMENT'
+        ]
+
+        for keyword in keywords:
+            if keyword in text.upper():
+                items.append(keyword)
+
+        # Pattern 3: Recommendations
+        recommendations = re.findall(r'Recommendation:\s*(.+?)(?=\nRecommendation:|\n\d+\.|\Z)', text, re.DOTALL | re.IGNORECASE)
+        for rec in recommendations:
+            rec = rec.strip()
+            rec = re.sub(r'\s+', ' ', rec)  # Normalize whitespace
+            if len(rec) > 20:
+                items.append(f"RECOMMENDATION: {rec}")
+
+        # Pattern 4: Resolutions (2025-807, etc.)
+        resolutions = re.findall(r'\b(20\d{2}-\d{3,4})\b', text)
+        for resolution in resolutions:
+            items.append(f"RESOLUTION {resolution}")
+
+        return items
 
     def _extract_pdf_text(self, meeting: MeetingRecord, doc_type: str):
         """Download and extract text from PDF (agenda or minutes)."""

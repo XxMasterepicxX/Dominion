@@ -411,7 +411,7 @@ async def backfill_council(market_config):
                     result = await ingestion_service.ingest(
                         fact_type='council_meeting',
                         source_url=market_config.scrapers.council.endpoint,
-                        raw_content=meeting.to_dict(),
+                        raw_content=meeting,  # Already a dict, no .to_dict() needed
                         parser_version='v1.0',
                         db_session=db_session
                     )
@@ -483,7 +483,7 @@ async def main():
     print(f"Duration: {duration}")
     print("=" * 80)
 
-    await db_manager.shutdown()
+    await db_manager.close()
 
 
 if __name__ == "__main__":

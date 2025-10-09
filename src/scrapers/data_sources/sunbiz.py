@@ -36,35 +36,103 @@ class SunbizScraper:
     # Real estate keywords for filtering (weighted by strength of signal)
     # Strong signals - almost always property-related
     STRONG_REAL_ESTATE_KEYWORDS = [
+        # Core real estate terms
         'REAL ESTATE', 'REALTY', 'PROPERTY', 'PROPERTIES',
         'DEVELOPMENT', 'DEVELOPMENTS', 'DEVELOPER',
         'LAND', 'HOLDINGS', 'APARTMENT', 'APARTMENTS',
         'CONDOS', 'CONDO', 'TOWNHOME', 'TOWNHOMES',
         'ESTATES', 'TITLE', 'MORTGAGE', 'LENDING',
-        'RENTAL', 'RENTALS', 'LEASE', 'LEASING'
+        'RENTAL', 'RENTALS', 'LEASE', 'LEASING',
+
+        # Land/geographic (high confidence)
+        'ACRE', 'ACRES',
+        'FARM', 'FARMS', 'RANCH', 'RANCHES',
+        'ISLAND', 'ISLE', 'ISLES',
+        'BAY', 'BEACH', 'COAST', 'COASTAL',
+        'WATERFRONT', 'LAKEFRONT', 'OCEANFRONT', 'RIVERFRONT',
+        'GROVE', 'GROVES',
+
+        # Property types (high confidence)
+        'WAREHOUSE', 'WAREHOUSES',
+        'STORAGE', 'SELF-STORAGE',
+        'FACILITY', 'FACILITIES',
+        'PLAZA', 'CENTER', 'SHOPPING',
+        'OFFICE', 'RETAIL',
+        'INDUSTRIAL',
+        'MULTI-FAMILY', 'MULTIFAMILY',
+
+        # Residential (high confidence)
+        'LIVING', 'SPACES',
+        'DWELLING', 'DWELLINGS',
+        'UNIT', 'UNITS',
+        'RESIDENCE', 'RESIDENCES',
+        'VILLA', 'VILLAS'
     ]
 
     # Medium signals - often property-related but context-dependent
     MEDIUM_REAL_ESTATE_KEYWORDS = [
+        # Construction/improvement
         'CONSTRUCTION', 'BUILDING', 'BUILDERS',
-        'INVESTMENT', 'INVESTMENTS', 'HOUSING',
-        'RESIDENTIAL', 'COMMERCIAL', 'VENTURES',
-        'CAPITAL', 'RENOVATIONS', 'MANAGEMENT',
-        'ACQUISITION', 'EQUITY', 'ASSET', 'ASSETS',
+        'RENOVATIONS', 'RENOVATION',
         'HOME', 'HOMES', 'ROOFING', 'ROOF',
         'FLOORING', 'FLOOR', 'HVAC', 'PLUMBING',
-        'SOLAR', 'LANDSCAPING', 'LANDSCAPE'
+        'SOLAR', 'LANDSCAPING', 'LANDSCAPE',
+
+        # Investment/financial
+        'INVESTMENT', 'INVESTMENTS', 'HOUSING',
+        'RESIDENTIAL', 'COMMERCIAL', 'VENTURES',
+        'CAPITAL', 'ACQUISITION', 'EQUITY', 'ASSET', 'ASSETS',
+        'RESERVE', 'RESERVES',
+        'PRESERVE', 'PRESERVES',
+        'TRUST', 'TRUSTS',
+        'FUND', 'FUNDS',
+        'PARTNERSHIP', 'SYNDICATE',
+
+        # Management/operations
+        'MANAGEMENT',
+
+        # Property maintenance (medium confidence)
+        'STRIPING',  # Parking lot striping
+        'PAVER', 'PAVERS',
+        'DRIVEWAY', 'DRIVEWAYS',
+        'SIDING',
+        'PAINTING',
+        'WINDOWS', 'WINDOW',
+        'DOORS', 'DOOR',
+        'FENCING',
+        'GUTTER', 'GUTTERS',
+        'DECK', 'DECKS',
+        'PATIO', 'PATIOS'
     ]
 
     # Exclusion patterns - these indicate NOT property-related
     EXCLUSION_PATTERNS = [
+        # Medical/healthcare
         'HOME CARE', 'HOMECARE', 'HOME HEALTH',
+        'NURSING HOME', 'MENTAL HEALTH', 'HOME THERAPY',
+        'MEDICAL SERVICES', 'HEALTHCARE SERVICES',
+
+        # Education
         'HOMESCHOOL', 'HOME SCHOOL',
+
+        # Rentals (non-property)
         'GAMING RENTAL', 'EQUIPMENT RENTAL',
         'CAR RENTAL', 'VEHICLE RENTAL',
+
+        # Retail/commercial (non-RE)
         'HOME IMPROVEMENT STORE', 'HOME DECOR',
-        'MOBILE HOME', 'NURSING HOME',
-        'MENTAL HEALTH', 'HOME THERAPY'
+        'RESTAURANT', 'BAR', 'CAFE',
+        'RETAIL STORE', 'SHOP', 'BOUTIQUE',
+
+        # Technology/consulting
+        'IT CONSULTING', 'TECH CONSULTING',
+        'SOFTWARE CONSULTING', 'BUSINESS CONSULTING',
+        'IT MANAGEMENT', 'SOFTWARE MANAGEMENT',
+        'TECH SERVICES', 'IT SERVICES',
+        'SOFTWARE SOLUTIONS', 'TECH SOLUTIONS',
+
+        # Mobile homes (different market)
+        'MOBILE HOME'
     ]
 
     # Event type classifications

@@ -82,11 +82,19 @@ class CrimeDataScraper:
                 for record in data:
                     # Socrata stores location in different formats
                     if 'location' in record and isinstance(record['location'], dict):
-                        # Format: {"latitude": "29.123", "longitude": "-82.456"}
-                        record['latitude'] = record['location'].get('latitude')
-                        record['longitude'] = record['location'].get('longitude')
+                        loc = record['location']
+                        # Format 1: GeoJSON {"type": "Point", "coordinates": [lng, lat]}
+                        if 'coordinates' in loc and isinstance(loc['coordinates'], list):
+                            coords = loc['coordinates']
+                            if len(coords) >= 2:
+                                record['longitude'] = coords[0]
+                                record['latitude'] = coords[1]
+                        # Format 2: {"latitude": "29.123", "longitude": "-82.456"}
+                        elif 'latitude' in loc and 'longitude' in loc:
+                            record['latitude'] = loc['latitude']
+                            record['longitude'] = loc['longitude']
                     elif 'location_1' in record and isinstance(record['location_1'], dict):
-                        # Format: {"coordinates": [-82.456, 29.123]}
+                        # Format 3: {"coordinates": [-82.456, 29.123]}
                         coords = record['location_1'].get('coordinates', [None, None])
                         if coords and len(coords) >= 2:
                             record['longitude'] = coords[0]
