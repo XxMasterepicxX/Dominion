@@ -82,10 +82,40 @@ class DominionAgent:
         self.model_name = 'gemini-2.5-pro'
         self.system_instruction = SYSTEM_PROMPT
 
+        # Configure rate limiting based on tier
+        self.gemini_tier = os.getenv('GEMINI_TIER', 'free').lower()
+        if self.gemini_tier == 'free':
+            # Free tier: 2 RPM = 60 seconds between requests (conservative to avoid 429 errors)
+            self.rate_limit_delay = 60.0
+            self.max_rpm = 1
+        else:
+            # Paid tier: 300 RPM = 0.2 seconds between requests (very fast)
+            self.rate_limit_delay = 0.2
+            self.max_rpm = 300
+
+        self.last_api_call = None
+
         logger.info("dominion_agent_initialized",
                    model="gemini-2.5-pro",
+                   gemini_tier=self.gemini_tier,
+                   max_rpm=self.max_rpm,
+                   rate_limit_delay=self.rate_limit_delay,
                    thinking_mode=True,
                    sdk="google-genai")
+
+    async def _apply_rate_limit(self):
+        """Apply rate limiting delay before API call"""
+        if self.last_api_call:
+            elapsed = (datetime.now() - self.last_api_call).total_seconds()
+            if elapsed < self.rate_limit_delay:
+                delay = self.rate_limit_delay - elapsed
+                logger.info("rate_limit_delay",
+                           tier=self.gemini_tier,
+                           delay_seconds=round(delay, 1),
+                           elapsed_since_last=round(elapsed, 1))
+                await asyncio.sleep(delay)
+
+        self.last_api_call = datetime.now()
 
     async def analyze(self, user_query: str) -> Dict[str, Any]:
         """
@@ -254,27 +284,44 @@ class DominionAgent:
         """
         market_name = CurrentMarket.get_name()
 
-        # Build prompt dynamically
+        # Build prompt dynamically with institutional analysis framework
         prompt = f"""Real Estate Analysis Request
 
 Market: {market_name}
 Query: {user_query}
 
+INSTITUTIONAL ANALYSIS APPROACH:
+1. Gather comprehensive data using tools
+   Note: Tools apply basic price filters to exclude obvious data errors (sales outside $1k-$10M range)
+2. Calculate key ratios and patterns from raw data:
+   - Permit-to-sales ratio (permits issued / sales completed)
+   - Sales velocity (properties sold per month)
+   - Developer concentration (% market share by permit count)
+   - Acquisition frequency (properties bought per 30/90/180 days)
+   - Geographic proximity (distances between parcels)
+3. Compare current data to historical baselines (12-month, 24-month)
+4. Analyze the numbers and draw your own conclusions
+
 Instructions:
-- Use available tools to gather data
-- Think through the analysis step by step
-- Cite specific evidence from tool responses
-- Return structured JSON with recommendation and reasoning
-- For strategic queries, provide specific addresses and parcel IDs (not generic examples)
+- Use available tools strategically to gather complete picture
+- Think step by step like institutional analyst
+- Cite specific numbers and evidence from tool responses
+- Return structured JSON with recommendation and detailed reasoning
+- For strategic queries, provide VERIFIED addresses from analyze_property calls
 
 Output Format:
 {{
   "recommendation": "BUY/AVOID/INVESTIGATE",
   "deal_success_probability": 0-100,
   "confidence": "high/medium/low",
-  "reasoning": "Evidence-based analysis",
+  "reasoning": "Data-driven analysis with institutional metrics",
+  "key_factors": {{
+    "supply_demand": "Permit-to-sales ratio and velocity metrics",
+    "smart_money": "Institutional investor activity patterns",
+    "risks": "Concentration, oversupply, volatility indicators"
+  }},
   "recommendations": [
-    {{"address": "Specific address", "parcel_id": "ID", "priority": "HIGH/MEDIUM/LOW", "reasoning": "Why"}}
+    {{"address": "VERIFIED address from tools", "parcel_id": "ID", "priority": "HIGH/MEDIUM/LOW", "reasoning": "Why with data"}}
   ]
 }}
 """
@@ -405,13 +452,16 @@ Output Format:
         conversation = []
         conversation.append({'role': 'user', 'parts': [{'text': prompt}]})
 
-        max_iterations = 5
+        max_iterations = 15  # Increased from 5 to allow strategic queries to complete
         tool_calls_made = []
 
         for iteration in range(max_iterations):
             logger.info("tool_calling_iteration",
                        iteration=iteration + 1,
                        max=max_iterations)
+
+            # Apply rate limiting before API call
+            await self._apply_rate_limit()
 
             # Call Gemini
             response = self.client.models.generate_content(

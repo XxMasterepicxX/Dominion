@@ -288,10 +288,104 @@ async def run_council_scraper(market_config, months_back=3):
         return {'total': 0, 'ingested': 0, 'error': str(e)}
 
 
+async def run_census_scraper(market_config, market_id='gainesville_fl'):
+    """Run census demographics scraper"""
+    print("\n" + "=" * 80)
+    print("6. CENSUS DEMOGRAPHICS (US Census Bureau ACS5)")
+    print("=" * 80)
+
+    try:
+        from src.scrapers.demographics.census_demographics import CensusScraper
+        from sqlalchemy import text
+        import json
+
+        scraper = CensusScraper(market_config)
+
+        # Fetch census data
+        census_data = scraper.fetch_county_data()
+
+        if not census_data:
+            print("[ERROR] Failed to fetch census data")
+            return {'total': 0, 'stored': 0, 'error': 'Fetch failed'}
+
+        # Extract variables
+        population = int(census_data.get('B01003_001E', 0))
+        median_income = int(census_data.get('B19013_001E', 0))
+        median_home_value = int(census_data.get('B25077_001E', 0))
+
+        print(f"Found census data:")
+        print(f"  Population: {population:,}")
+        print(f"  Median Income: ${median_income:,}")
+        print(f"  Median Home Value: ${median_home_value:,}\n")
+
+        # Get market UUID and store in database
+        async with db_manager.get_session() as session:
+            result = await session.execute(
+                text("SELECT id FROM markets WHERE market_code = :code"),
+                {'code': market_id}
+            )
+            row = result.fetchone()
+            if not row:
+                print(f"[ERROR] Market not found: {market_id}")
+                return {'total': 0, 'stored': 0, 'error': 'Market not found'}
+
+            market_uuid = str(row[0])
+
+            # Store in database (upsert)
+            query = text("""
+                INSERT INTO market_demographics (
+                    market_id,
+                    total_population,
+                    median_household_income,
+                    median_home_value,
+                    census_variables,
+                    data_year,
+                    census_dataset
+                ) VALUES (
+                    :market_id,
+                    :population,
+                    :income,
+                    :home_value,
+                    :census_vars,
+                    2022,
+                    'acs5'
+                )
+                ON CONFLICT (market_id, data_year)
+                DO UPDATE SET
+                    total_population = EXCLUDED.total_population,
+                    median_household_income = EXCLUDED.median_household_income,
+                    median_home_value = EXCLUDED.median_home_value,
+                    census_variables = EXCLUDED.census_variables,
+                    scraped_at = NOW()
+                RETURNING id
+            """)
+
+            result = await session.execute(query, {
+                'market_id': market_uuid,
+                'population': population,
+                'income': median_income,
+                'home_value': median_home_value,
+                'census_vars': json.dumps(census_data)
+            })
+
+            await session.commit()
+
+            demo_id = result.fetchone()[0]
+
+        print(f"[OK] Census: Stored demographics (id: {demo_id})")
+        return {'total': 1, 'stored': 1, 'demographics_id': str(demo_id)}
+
+    except Exception as e:
+        print(f"[ERROR] {str(e)[:200]}")
+        import traceback
+        traceback.print_exc()
+        return {'total': 0, 'stored': 0, 'error': str(e)}
+
+
 async def run_sunbiz_scraper(market_config, limit=None):
     """Run Sunbiz scraper (SYNC)"""
     print("\n" + "=" * 80)
-    print("6. SUNBIZ (Florida Business Entities)")
+    print("7. SUNBIZ (Florida Business Entities)")
     print("=" * 80)
 
     try:
@@ -379,6 +473,7 @@ async def main():
     results['crime'] = await run_crime_scraper(market_config, days_back=30)
     results['news'] = await run_news_scraper(market_config)
     results['council'] = await run_council_scraper(market_config, months_back=3)
+    results['census'] = await run_census_scraper(market_config, market_id='gainesville_fl')
     results['sunbiz'] = await run_sunbiz_scraper(market_config, limit=None)  # No limit!
 
     # Final summary
@@ -390,12 +485,14 @@ async def main():
     for source, stats in results.items():
         print(f"\n{source.upper().replace('_', ' ')}:")
         print(f"  Total found: {stats.get('total', 0)}")
-        print(f"  Ingested: {stats.get('ingested', 0)}")
+        # Census uses 'stored' instead of 'ingested'
+        ingested = stats.get('ingested', stats.get('stored', 0))
+        print(f"  Ingested: {ingested}")
         if 'duplicates' in stats:
             print(f"  Duplicates: {stats['duplicates']}")
         if 'error' in stats:
             print(f"  ERROR: {stats['error'][:100]}")
-        total_ingested += stats.get('ingested', 0)
+        total_ingested += ingested
 
     print(f"\nTOTAL NEW RECORDS INGESTED: {total_ingested}")
 
@@ -415,6 +512,7 @@ async def main():
             ('news_articles', 'News Articles'),
             ('council_meetings', 'Council Meetings'),
             ('llc_formations', 'LLC Formations'),
+            ('market_demographics', 'Market Demographics (Census)'),
             ('raw_facts', 'Raw Facts (Total)'),
             ('properties', 'Properties'),
             ('bulk_property_records', 'Bulk Property Records (CAMA)'),

@@ -17,34 +17,20 @@ from src.services.qpublic_enrichment import QPublicEnrichmentService
 TOOL_DEFINITIONS = [
     {
         "name": "analyze_property",
-        "description": """Get comprehensive property intelligence for a specific address or parcel.
+        "description": """Get comprehensive property data for a specific address or parcel.
 
 WHEN TO USE: User asks about a specific property (e.g., "Should I buy 123 Main St?")
 
-RETURNS: Complete property data including:
+RETURNS:
 - property: Core details (address, market_value, lot_size_acres, property_type, zoning, year_built)
 - owner: Current owner info (entity_name, entity_type, mailing_address)
-  * CRITICAL: Check entity_name to verify ownership - don't recommend properties owned by the developer you're following!
-- owner_portfolio: Portfolio stats (total_properties, total_value, recent_acquisitions)
-  * KEY: Large portfolio indicates sophisticated investor (FOLLOW SMART MONEY signal)
-  * KEY: Multiple recent acquisitions indicates ACTIVE BUYER (bullish market signal)
-- sales_history: Full transaction history (all prior sales, dates, prices)
-  * Use to identify: recent flips, price trends, ownership stability
-  * Red flags: Multiple sales in short period, declining prices, suspicious transactions
-- permits: Building permits at property and in owner's portfolio (construction activity)
-- crime: Crime risk score (1-10, lower is better) and incidents nearby
-- neighborhood: Comparable properties and avg_market_value
-  * Use avg_market_value to calculate if property is undervalued
-- news: Media mentions of property or area
-- council: City council activity mentions
-
-HOW TO USE THE DATA:
-1. VERIFY OWNERSHIP: Check owner.entity_name - if it's the developer you're following, EXCLUDE it
-2. Check owner_portfolio.total_properties - Large portfolios indicate sophisticated investors
-3. Review sales_history - Look for red flags (flips, price drops) or positive signals (long-term hold)
-4. Compare property.market_value to neighborhood.avg_market_value for valuation
-5. Check crime.risk_score on 1-10 scale (lower is better, higher is worse)
-6. Review permits for development activity signals
+- owner_portfolio: Portfolio stats (total_properties, total_value, recent_acquisitions count)
+- sales_history: Full transaction history (dates, prices, buyer/seller names)
+- permits: Building permits at property and in owner's portfolio (dates, types, statuses, values)
+- crime: Crime incidents nearby (counts, types, dates)
+- neighborhood: Comparable properties (market_value stats, property counts)
+- news: Media mentions of property or area (titles, dates, sources)
+- council: City council activity mentions (meeting dates, topics)
 """,
         "parameters": {
             "type": "object",
@@ -71,28 +57,22 @@ HOW TO USE THE DATA:
     },
     {
         "name": "analyze_entity",
-        "description": """Get owner/investor intelligence and portfolio analysis.
+        "description": """Get owner/investor portfolio data and activity patterns.
 
 WHEN TO USE:
 1. User asks "What is [ENTITY] buying?" or "Follow [DEVELOPER]"
-2. After analyze_property shows owner with 10+ properties (want to understand their strategy)
+2. After analyze_property shows owner with many properties
 3. Researching developer patterns or assemblage plays
 
-RETURNS: Comprehensive entity statistics including:
+RETURNS:
 - entity_id: Unique identifier
 - entity_name: Normalized name
 - entity_type: Classification (person, company, llc, institutional)
 - portfolio: Total properties owned, total market value, average property value
-  * INTERPRETATION: Large portfolio (~20+ properties) = typically sophisticated investor (FOLLOW SMART MONEY)
-  * INTERPRETATION: Medium (~6-20) = active investor, Small (~1-5) = individual investor
-  * Note: Adjust for market context - 10 may be "large" in small markets, 30 may be "medium" in metros
-- activity: Recent acquisitions timeline (last 180 days)
-  * INTERPRETATION: Multiple recent acquisitions (3+) = ACTIVE BUYER (very bullish signal)
-  * INTERPRETATION: No recent acquisitions = passive holder (neutral signal)
-  * Note: Compare to investor's historical pace - what's "active" varies by investor
-- property_preferences: Types they buy (VACANT, SINGLE FAMILY, COMMERCIAL, etc.)
-- markets: Cross-market presence (if operating in multiple cities)
-- geographic_clustering: Where their properties are concentrated
+- activity: Recent acquisitions (dates, property types, values) for last 180 days
+- property_preferences: Property type counts (VACANT, SINGLE FAMILY, COMMERCIAL, etc.)
+- markets: Cross-market presence (city names, property counts)
+- geographic_clustering: Where properties are concentrated (addresses, coordinates)
 
 TOOL CALLING STRATEGY:
 1. Call analyze_entity() FIRST to get statistics

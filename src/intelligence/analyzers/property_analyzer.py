@@ -400,6 +400,13 @@ class PropertyAnalyzer:
               AND longitude BETWEEN :min_lon AND :max_lon
               AND property_type = :property_type
               AND (land_zoning_code = :zoning_code OR land_zoning_code IS NULL)
+              -- INSTITUTIONAL QUALITY FILTERS (CoStar-style):
+              -- Exclude likely flips (multiple recent sales indicate flipping, not organic transactions)
+              -- Exclude extreme outliers (prices > $10M likely portfolio/special use)
+              -- Exclude data errors (sales < $1000 likely gifts/transfers/errors)
+              AND (last_sale_price IS NULL OR (last_sale_price >= 1000 AND last_sale_price <= 10000000))
+              -- Exclude vacant lots when analyzing improved properties
+              AND (market_value > 0 OR market_value IS NULL)
         """)
 
         recent_date = datetime.now() - timedelta(days=180)

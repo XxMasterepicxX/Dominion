@@ -55,8 +55,10 @@ class MarketAnalyzer:
         include_crime_trends: bool = True,
         include_development_sentiment: bool = True,
         include_permit_velocity: bool = True,
+        include_multi_developer_permits: bool = True,
         recent_period_days: int = 180,
-        price_percentiles: List[int] = [25, 50, 75, 90]
+        price_percentiles: List[int] = [25, 50, 75, 90],
+        top_developers: int = 10
     ) -> Dict[str, Any]:
         """
         Analyze a real estate market comprehensively
@@ -116,6 +118,7 @@ class MarketAnalyzer:
             'crime_trends': None,
             'development_sentiment': None,
             'permit_velocity': None,
+            'multi_developer_permits': None,
             'analysis_metadata': {
                 'analyzed_at': datetime.now().isoformat(),
                 'includes': {
@@ -126,11 +129,13 @@ class MarketAnalyzer:
                     'construction_pipeline': include_construction_pipeline,
                     'crime_trends': include_crime_trends,
                     'development_sentiment': include_development_sentiment,
-                    'permit_velocity': include_permit_velocity
+                    'permit_velocity': include_permit_velocity,
+                    'multi_developer_permits': include_multi_developer_permits
                 },
                 'parameters': {
                     'recent_period_days': recent_period_days,
-                    'price_percentiles': price_percentiles
+                    'price_percentiles': price_percentiles,
+                    'top_developers': top_developers
                 }
             }
         }
@@ -191,14 +196,26 @@ class MarketAnalyzer:
                 recent_days=recent_period_days
             )
 
+        # Get multi-developer permits
+        if include_multi_developer_permits:
+            result['multi_developer_permits'] = await self._get_multi_developer_permits(
+                market_data['id'],
+                recent_days=recent_period_days,
+                top_n=top_developers
+            )
+
+        # Get demographics (census data)
+        result['demographics'] = await self._get_demographics(market_data['id'])
+
         logger.info(
             "market_analysis_completed",
             market_id=market_data['id'],
             market_code=market_data['market_code'],
-            construction_pipeline_risk=result.get('construction_pipeline', {}).get('oversupply_risk_level') if result.get('construction_pipeline') else None,
-            crime_trend=result.get('crime_trends', {}).get('trend') if result.get('crime_trends') else None,
-            political_climate=result.get('development_sentiment', {}).get('political_climate') if result.get('development_sentiment') else None,
-            permit_activity_level=result.get('permit_velocity', {}).get('market_activity_level') if result.get('permit_velocity') else None
+            total_permits=result.get('construction_pipeline', {}).get('total_permits') if result.get('construction_pipeline') else None,
+            crime_incidents=result.get('crime_trends', {}).get('total_incidents') if result.get('crime_trends') else None,
+            council_meetings=result.get('development_sentiment', {}).get('council_activity', {}).get('total_meetings') if result.get('development_sentiment') else None,
+            permit_count=result.get('permit_velocity', {}).get('total_permits') if result.get('permit_velocity') else None,
+            developers_analyzed=result.get('multi_developer_permits', {}).get('developers_found') if result.get('multi_developer_permits') else None
         )
 
         return result
@@ -580,23 +597,10 @@ class MarketAnalyzer:
                 })
                 total_units += int(row[1])
 
-            # Calculate oversupply risk
-            if total_units >= 500:
-                risk_level = 'very_high'
-            elif total_units >= 200:
-                risk_level = 'high'
-            elif total_units >= 100:
-                risk_level = 'moderate'
-            elif total_units >= 50:
-                risk_level = 'low'
-            else:
-                risk_level = 'minimal'
-
             return {
                 'pipeline': pipeline,
                 'total_permits': total_units,
                 'total_project_value': sum(p.get('total_value', 0) or 0 for p in pipeline),
-                'oversupply_risk_level': risk_level,
                 'period_days': recent_days
             }
 
@@ -606,7 +610,6 @@ class MarketAnalyzer:
                 'pipeline': [],
                 'total_permits': 0,
                 'total_project_value': 0,
-                'oversupply_risk_level': 'unknown',
                 'period_days': recent_days
             }
 
@@ -671,26 +674,17 @@ class MarketAnalyzer:
             if not row:
                 return {
                     'total_incidents': 0,
-                    'trend': 'unknown',
-                    'safety_level': 'unknown',
+                    'violent_crimes': 0,
+                    'prior_period_incidents': 0,
+                    'trend_pct': 0,
+                    'top_incident_types': [],
                     'period_days': recent_days
                 }
 
             current_incidents = int(row[0]) if row[0] else 0
             violent_crimes = int(row[1]) if row[1] else 0
+            prior_incidents = int(row[2]) if row[2] else 0
             trend_pct = float(row[3]) if row[3] else 0
-
-            # Calculate safety level
-            if current_incidents < 100:
-                safety_level = 'very_safe'
-            elif current_incidents < 500:
-                safety_level = 'safe'
-            elif current_incidents < 1000:
-                safety_level = 'moderate'
-            elif current_incidents < 2000:
-                safety_level = 'concerning'
-            else:
-                safety_level = 'high_risk'
 
             top_types = []
             if row[4] and row[5]:
@@ -703,9 +697,8 @@ class MarketAnalyzer:
             return {
                 'total_incidents': current_incidents,
                 'violent_crimes': violent_crimes,
+                'prior_period_incidents': prior_incidents,
                 'trend_pct': round(trend_pct, 1),
-                'trend': 'increasing' if trend_pct > 10 else 'decreasing' if trend_pct < -10 else 'stable',
-                'safety_level': safety_level,
                 'top_incident_types': top_types,
                 'period_days': recent_days
             }
@@ -714,8 +707,10 @@ class MarketAnalyzer:
             logger.warning("crime_trends_query_failed", error=str(e))
             return {
                 'total_incidents': 0,
-                'trend': 'unknown',
-                'safety_level': 'unknown',
+                'violent_crimes': 0,
+                'prior_period_incidents': 0,
+                'trend_pct': 0,
+                'top_incident_types': [],
                 'period_days': recent_days
             }
 
@@ -728,8 +723,7 @@ class MarketAnalyzer:
 
         result = {
             'council_activity': None,
-            'news_coverage': None,
-            'political_climate': 'neutral'
+            'news_coverage': None
         }
 
         try:
@@ -785,14 +779,6 @@ class MarketAnalyzer:
                     'avg_relevance': round(float(news_row[2]), 2) if news_row[2] else None
                 }
 
-            # Determine political climate
-            if result['council_activity'] and result['council_activity']['development_related'] > 10:
-                result['political_climate'] = 'pro_development'
-            elif result['news_coverage'] and result['news_coverage']['development_related'] > 20:
-                result['political_climate'] = 'active_market'
-            else:
-                result['political_climate'] = 'neutral'
-
         except Exception as e:
             logger.warning("development_sentiment_query_failed", error=str(e))
 
@@ -827,31 +813,19 @@ class MarketAnalyzer:
             if not row or not row[0]:
                 return {
                     'total_permits': 0,
-                    'market_activity_level': 'inactive',
+                    'unique_contractors': 0,
+                    'avg_project_value': None,
+                    'total_project_value': None,
+                    'most_common_permit_type': None,
                     'period_days': recent_days
                 }
 
-            total_permits = int(row[0])
-
-            # Determine activity level
-            if total_permits >= 500:
-                activity_level = 'very_active'
-            elif total_permits >= 200:
-                activity_level = 'active'
-            elif total_permits >= 100:
-                activity_level = 'moderate'
-            elif total_permits >= 50:
-                activity_level = 'low'
-            else:
-                activity_level = 'minimal'
-
             return {
-                'total_permits': total_permits,
+                'total_permits': int(row[0]),
                 'unique_contractors': int(row[1]) if row[1] else 0,
                 'avg_project_value': float(row[2]) if row[2] else None,
                 'total_project_value': float(row[3]) if row[3] else None,
                 'most_common_permit_type': row[4],
-                'market_activity_level': activity_level,
                 'period_days': recent_days
             }
 
@@ -859,8 +833,125 @@ class MarketAnalyzer:
             logger.warning("permit_velocity_query_failed", error=str(e))
             return {
                 'total_permits': 0,
-                'market_activity_level': 'unknown',
+                'unique_contractors': 0,
+                'avg_project_value': None,
+                'total_project_value': None,
+                'most_common_permit_type': None,
                 'period_days': recent_days
+            }
+
+
+    async def _get_multi_developer_permits(
+        self,
+        market_id: str,
+        recent_days: int = 180,
+        top_n: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Get permit activity for top developers in market - pure data, no interpretations.
+        Returns permits grouped by developer with full details.
+        """
+        try:
+            query = text(f"""
+                WITH developer_permits AS (
+                    SELECT
+                        e.name as entity_name,
+                        e.id as entity_id,
+                        COUNT(*) as total_permits,
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'permit_number', p.permit_number,
+                                'permit_type', p.permit_type,
+                                'work_type', p.work_type,
+                                'status', p.status,
+                                'application_date', p.application_date,
+                                'project_value', p.project_value
+                            ) ORDER BY p.application_date DESC
+                        ) as permits
+                    FROM permits p
+                    JOIN entities e ON p.contractor_entity_id = e.id
+                    WHERE p.market_id = :market_id
+                      AND p.application_date >= CURRENT_DATE - INTERVAL '{recent_days} days'
+                    GROUP BY e.name, e.id
+                    HAVING COUNT(*) > 0
+                    ORDER BY COUNT(*) DESC
+                    LIMIT :top_n
+                )
+                SELECT * FROM developer_permits
+            """)
+
+            result = await self.session.execute(
+                query,
+                {'market_id': market_id, 'top_n': top_n}
+            )
+
+            developers = []
+            for row in result:
+                developers.append({
+                    'entity_name': row[0],
+                    'entity_id': str(row[1]),
+                    'total_permits': int(row[2]),
+                    'permits': row[3] if row[3] else []
+                })
+
+            return {
+                'developers': developers,
+                'period_days': recent_days,
+                'top_n_requested': top_n,
+                'developers_found': len(developers)
+            }
+
+        except Exception as e:
+            logger.warning("multi_developer_permits_query_failed", error=str(e))
+            return {
+                'developers': [],
+                'period_days': recent_days,
+                'top_n_requested': top_n,
+                'developers_found': 0
+            }
+
+
+    async def _get_demographics(self, market_id: str) -> Dict[str, Any]:
+        """
+        Get census demographic data for market - pure data, no interpretations.
+        """
+        try:
+            query = text("""
+                SELECT
+                    total_population,
+                    median_household_income,
+                    median_home_value,
+                    data_year,
+                    scraped_at
+                FROM market_demographics
+                WHERE market_id = :market_id
+                ORDER BY data_year DESC
+                LIMIT 1
+            """)
+
+            result = await self.session.execute(query, {'market_id': market_id})
+            row = result.fetchone()
+
+            if not row:
+                return {
+                    'available': False,
+                    'message': 'No demographic data available for this market'
+                }
+
+            return {
+                'available': True,
+                'total_population': int(row[0]) if row[0] else None,
+                'median_household_income': int(row[1]) if row[1] else None,
+                'median_home_value': int(row[2]) if row[2] else None,
+                'data_year': int(row[3]),
+                'last_updated': row[4].isoformat() if row[4] else None
+            }
+
+        except Exception as e:
+            logger.warning("demographics_query_failed", error=str(e))
+            return {
+                'available': False,
+                'error': str(e)
             }
 
 
