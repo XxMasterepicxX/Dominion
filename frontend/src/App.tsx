@@ -1,26 +1,33 @@
-import React from 'react';
-import logo from './logo.svg';
+import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
 import './App.css';
+import { Footer } from './components/Footer';
+import { Navigation } from './components/Navigation';
+import { Dashboard } from './pages/Dashboard';
+import { Landing } from './pages/Landing';
 
-function App() {
+const AppShell = () => {
+  const location = useLocation();
+  const hideNav = location.pathname === '/dashboard';
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
+    <div className="app-shell">
+      {!hideNav && <Navigation />}
+      <main className="app-main">
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+        </Routes>
+      </main>
+      <Footer />
     </div>
   );
-}
+};
+
+const App = () => {
+  return (
+    <BrowserRouter>
+      <AppShell />
+    </BrowserRouter>
+  );
+};
 
 export default App;
