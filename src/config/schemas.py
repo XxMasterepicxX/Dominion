@@ -107,6 +107,18 @@ class BusinessScraperConfig(BaseModel):
     florida_trend: Optional[FloridaTrendConfig] = None
 
 
+class OrdinanceScraperConfig(BaseModel):
+    """Configuration for Municipal Ordinance scraper."""
+    enabled: bool = True
+    platform: str = Field(default="municode", description="Platform: 'municode', 'generalcode', 'americanlegal'")
+    state: str = Field(default="FL", description="State code (e.g., 'FL', 'GA')")
+    scope: str = Field(default="market", description="Scope: 'market' (city only), 'county' (all county cities), 'state' (all FL), 'custom' (specific list)")
+    municipalities: Optional[List[str]] = Field(None, description="List of specific cities (only used when scope='custom')")
+    output_dir: str = Field(default="data/ordinances", description="Output directory for scraped ordinances")
+    enable_caching: bool = Field(default=True, description="Enable caching for quarterly runs")
+    cache_ttl: int = Field(default=2592000, description="Cache TTL in seconds (default: 30 days)")
+
+
 class ScrapersConfig(BaseModel):
     """All scraper configurations for a market."""
     census: Optional[CensusScraperConfig] = None
@@ -119,6 +131,7 @@ class ScrapersConfig(BaseModel):
     county_permits: Optional[CountyPermitsScraperConfig] = None
     gis: Optional[GISScraperConfig] = None
     business: Optional[BusinessScraperConfig] = None
+    ordinances: Optional[OrdinanceScraperConfig] = None
 
 
 class MarketConfig(BaseModel):

@@ -92,6 +92,17 @@ scrapers:
         - "https://www.floridatrend.com/realestate/{date}/florida-real-estate/"
       # Note: Scraper runs 24/7, gets ALL articles from available weeks
 
+  # Ordinances scraper - Municode platform
+  ordinances:
+    enabled: true
+    platform: "municode"
+    state: "FL"
+    scope: "market"  # "market" = Gainesville only, "county" = all Alachua County, "state" = all FL
+    municipalities: null  # Only used when scope="custom"
+    output_dir: "data/ordinances"
+    enable_caching: true
+    cache_ttl: 2592000  # 30 days
+
 # Notes - All configs verified against actual src/ scraper code (Oct 1, 2025):
 # - Census: api.census.gov/data (100% portable)
 # - Sunbiz: SFTP Florida state-wide (works everywhere in FL)
