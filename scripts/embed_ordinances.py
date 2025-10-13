@@ -61,7 +61,7 @@ def embed_ordinances(
 
     print(f"\n2. Scanning for ordinances in {ordinance_dir}...")
     ordinance_path = Path(ordinance_dir)
-    ordinance_files = list(ordinance_path.glob("**/*.json"))
+    ordinance_files = list(ordinance_path.glob("**/*.md"))
     print(f"   Found {len(ordinance_files)} ordinance files")
 
     if len(ordinance_files) == 0:
@@ -77,11 +77,17 @@ def embed_ordinances(
     for ord_file in tqdm(ordinance_files, desc="Ordinances"):
         try:
             with open(ord_file, 'r', encoding='utf-8') as f:
-                ordinance = json.load(f)
+                full_text = f.read()
 
-            full_text = ordinance.get('content', '')
-            if not full_text:
+            if not full_text or len(full_text) < 100:
                 continue
+
+            # Get file metadata
+            file_stat = ord_file.stat()
+            file_modified = file_stat.st_mtime
+
+            # Extract city from filename (e.g., "gainesville_real_estate_ordinances.md")
+            city_name = ord_file.stem.replace('_real_estate_ordinances', '').replace('_', ' ').title()
 
             chunks = chunk_ordinance_by_sections(full_text)
             chunk_texts = [chunk['text'] for chunk in chunks]
@@ -97,13 +103,17 @@ def embed_ordinances(
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 all_embeddings.append({
                     "ordinance_file": str(ord_file.name),
-                    "city": ordinance.get('city', 'unknown'),
-                    "state": ordinance.get('state', 'FL'),
+                    "city": city_name,
+                    "state": "FL",
                     "chunk_number": chunk['chunk_number'],
                     "chunk_text": chunk['text'],
                     "chunk_chars": chunk['char_count'],
+                    "chunk_words": chunk['word_count'],
                     "embedding": embedding.tolist(),
-                    "content_hash": hashlib.sha256(chunk['text'].encode()).hexdigest()
+                    "content_hash": hashlib.sha256(chunk['text'].encode()).hexdigest(),
+                    "file_modified_timestamp": file_modified,
+                    "scraped_date": time.strftime("%Y-%m-%d", time.gmtime(file_modified)),
+                    "metadata": chunk.get('metadata', {})
                 })
 
             total_chunks += len(chunks)

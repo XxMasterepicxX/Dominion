@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.intelligence.analyzers import PropertyAnalyzer, EntityAnalyzer, MarketAnalyzer, PropertySearchAnalyzer
 from src.services.sunbiz_enrichment import SunbizEnrichmentService
 from src.services.qpublic_enrichment import QPublicEnrichmentService
+from src.services.ordinance_rag import get_ordinance_rag
 
 
 # Tool definitions for Gemini function calling
@@ -20,6 +21,10 @@ TOOL_DEFINITIONS = [
         "description": """Get comprehensive property data for a specific address or parcel.
 
 WHEN TO USE: User asks about a specific property (e.g., "Should I buy 123 Main St?")
+
+IMPORTANT: If you have parcel_id from search_properties or get_entity_properties results,
+USE parcel_id parameter (guaranteed match). Only use property_address when parcel_id unavailable
+(e.g., user provided address without prior search).
 
 RETURNS:
 - property: Core details (address, market_value, lot_size_acres, property_type, zoning, year_built)
@@ -35,13 +40,13 @@ RETURNS:
         "parameters": {
             "type": "object",
             "properties": {
-                "property_address": {
-                    "type": "string",
-                    "description": "Full property address (e.g., '123 Main St, City, State' or '123 Main St')"
-                },
                 "parcel_id": {
                     "type": "string",
-                    "description": "Alternative: Parcel ID if address is unknown (e.g., '12345-678-90')"
+                    "description": "Parcel ID for guaranteed property match (e.g., '12345-678-90'). PREFERRED: Use this if available from search_properties or get_entity_properties results."
+                },
+                "property_address": {
+                    "type": "string",
+                    "description": "Property address (e.g., '123 Main St, City, State'). Use only when parcel_id not available (e.g., user-provided address)."
                 },
                 "include_neighborhood": {
                     "type": "boolean",
@@ -49,7 +54,7 @@ RETURNS:
                 },
                 "neighborhood_radius_miles": {
                     "type": "number",
-                    "description": "Radius in miles for neighborhood analysis (default: 0.5). Use 0.25 for dense urban, 1.0 for rural."
+                    "description": "Radius in miles for neighborhood analysis (default: 0.5 miles). Agent determines appropriate radius based on area density."
                 }
             },
             "required": []  # None strictly required, but need one of property_address or parcel_id
@@ -63,6 +68,7 @@ WHEN TO USE:
 1. User asks "What is [ENTITY] buying?" or "Follow [DEVELOPER]"
 2. After analyze_property shows owner with many properties
 3. Researching developer patterns or assemblage plays
+4. Comparing multiple buyers for exit strategy selection (analyze several to compare criteria)
 
 RETURNS:
 - entity_id: Unique identifier
@@ -77,14 +83,14 @@ RETURNS:
 TOOL CALLING STRATEGY:
 1. Call analyze_entity() FIRST to get statistics
 2. Then call get_entity_properties() to get actual property list for pattern analysis
-3. DO NOT call analyze_property() for each property in portfolio (wasteful)
+3. Avoid calling analyze_property() for each property in portfolio (wasteful)
 """,
         "parameters": {
             "type": "object",
             "properties": {
                 "entity_name": {
                     "type": "string",
-                    "description": "Entity name exactly as it appears in property ownership records (e.g., 'ABC Development LLC', 'John Smith')"
+                    "description": "Entity name as it appears in property ownership records (e.g., 'ABC Development LLC', 'John Smith')"
                 },
                 "entity_id": {
                     "type": "string",
@@ -108,7 +114,24 @@ TOOL CALLING STRATEGY:
     },
     {
         "name": "analyze_market",
-        "description": "Get market intelligence including supply/demand dynamics, price trends, active competition, and investor concentration. Use this to understand the broader market context.",
+        "description": """Get market intelligence including supply/demand dynamics, price trends, active competition, and investor concentration.
+
+WHAT IT RETURNS:
+- Supply metrics: Inventory by property type, price distribution
+- Demand signals: Recent sales, appreciation rates, market velocity
+- Competition data: Active buyers list with:
+  * Entity names, recent acquisition counts, total portfolios
+  * Geographic concentration: WHERE each buyer focuses activity (SW, NE, NW, SE areas)
+  * Concentration score: How focused buyer is in specific area
+  * Top streets: Most active street corridors for each buyer
+- Investor concentration: Market share by major players
+
+USE FOR BUYER COMPARISON:
+The competition data includes active_buyers list showing who's acquiring properties and WHERE.
+Each buyer includes geographic_concentration showing which areas they focus on.
+Use this to match properties to buyers actively acquiring in that specific area.
+For wholesale/resale strategies, consider both acquisition volume AND geographic fit.
+""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -134,7 +157,7 @@ TOOL CALLING STRATEGY:
                 },
                 "recent_period_days": {
                     "type": "integer",
-                    "description": "Days to consider as 'recent' activity (default: 180). Use 90 for short-term, 365 for annual."
+                    "description": "Days to consider as 'recent' activity (default: 180 days). Agent determines appropriate timeframe based on analysis needs."
                 }
             },
             "required": []  # None strictly required, but need one of market_code or market_id
@@ -142,7 +165,7 @@ TOOL CALLING STRATEGY:
     },
     {
         "name": "enrich_entity_sunbiz",
-        "description": "**USE THIS TOOL** when you encounter an entity (owner) with unclear type or missing details. Searches Florida Sunbiz database to find LLC/corporation information, registered agents, filing status, and business structure. IMPORTANT: Call this when entity_type is 'person' but has many properties (10+), or when entity_type is 'unknown', or when you need to verify if an owner is actually a business entity.",
+        "description": "**Consider using this tool** when you encounter an entity (owner) with unclear type or missing details. Searches Florida Sunbiz database to find LLC/corporation information, registered agents, filing status, and business structure. Useful when entity_type is 'person' but has many properties (10+), or when entity_type is 'unknown', or when you need to verify if an owner is actually a business entity.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -196,7 +219,7 @@ RETURNS: List of properties matching filters, each with:
 - owner_name: Current owner
 
 CRITICAL: PROPERTY TYPE SELECTION
-- DO NOT default to property_type='VACANT' unless:
+- Avoid defaulting to property_type='VACANT' unless:
   1. User explicitly asks for land/vacant property, OR
   2. analyze_entity() showed successful investors prefer VACANT (from property_preferences)
 - Available property types: VACANT, SINGLE FAMILY, MULTI-FAMILY, CONDOMINIUM, COMMERCIAL, INDUSTRIAL, etc.
@@ -211,8 +234,8 @@ FILTERS FOR VACANT LAND (only when searching for land):
 LOT SIZE GUIDANCE (use professional judgment):
 - Consider user's intent and budget
 - Don't arbitrarily limit lot size unless user specifies
-- Tiny lots (<0.25 acres): May be unbuildable or have issues - investigate carefully
-- Large lots (>100 acres): May be agricultural, timber, or institutional - verify viability
+- Tiny lots (very small lots): May be unbuildable or have issues - investigate carefully
+- Large lots (very large lots): May be agricultural, timber, or institutional - verify viability
 - Use min/max_lot_size filters ONLY if they make sense for the specific query
 - Example: "$50k budget" doesn't automatically mean "limit to 10 acres" - could get 50 acres for that price
 
@@ -296,7 +319,7 @@ EXAMPLES (illustrative only - adapt to user's actual query):
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum results to return (default: 50). Use 30-50 for general searches to ensure broad evaluation, smaller for targeted searches."
+                    "description": "Maximum results to return (default: 50). Agent determines appropriate limit based on search scope."
                 }
             },
             "required": []
@@ -354,6 +377,65 @@ TOOL EFFICIENCY:
             },
             "required": ["entity_name"]
         }
+    },
+    {
+        "name": "search_ordinances",
+        "description": """Search municipal ordinances and zoning codes using natural language queries.
+
+WHEN TO USE:
+- User asks about zoning regulations, building codes, or municipal rules
+- User asks "Can I...?" questions about property use (e.g., "Can I build a duplex?", "Can I operate a business?")
+- User asks about permit requirements, setbacks, parking, height limits, etc.
+- After analyze_property() to check if planned use is allowed by zoning
+- To understand what's allowed/prohibited for a specific property or zone
+
+WHAT IT RETURNS:
+- Relevant ordinance sections with exact legal text
+- City-specific regulations (automatically filtered if city is known)
+- Relevance scores showing how well each result matches the query
+
+LOCATION FILTERING:
+- If user mentions a city (e.g., "in Gainesville"), specify city parameter
+- If querying about a specific property, use the property's city
+- If no city specified, searches all municipalities in the county
+
+AVAILABLE CITIES:
+- Gainesville, Alachua County, Alachua, Hawthorne, Archer, Newberry, High Springs, Micanopy, Waldo
+
+EXAMPLE QUERIES:
+- "What are setback requirements?" - Returns setback regulations
+- "Can I build a duplex in R1 zoning?" - Returns residential zoning rules
+- "What permits do I need for renovation?" - Returns permit requirements
+- "parking requirements for multifamily" - Returns parking regulations
+- "Are accessory dwelling units allowed?" - Returns ADU regulations
+
+IMPORTANT:
+- This searches the ACTUAL ordinance text, not summaries
+- Results include exact legal citations and requirements
+- Use this BEFORE telling user what's allowed/prohibited
+- Don't guess at regulations - search and cite the ordinance""",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural language query about ordinances (e.g., 'setback requirements', 'parking for multifamily', 'can I build a duplex')"
+                },
+                "city": {
+                    "type": "string",
+                    "description": "Optional: Filter to specific city (e.g., 'Gainesville', 'Alachua County'). Use this if user mentions a city or if searching for a specific property."
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Number of results to return (default: 5). Agent determines count based on query complexity."
+                },
+                "min_relevance": {
+                    "type": "number",
+                    "description": "Minimum relevance score 0-1 (default: 0.6 relevance threshold). Agent adjusts based on query specificity."
+                }
+            },
+            "required": ["query"]
+        }
     }
 ]
 
@@ -408,6 +490,8 @@ class AgentTools:
             return await self._enrich_entity_sunbiz(**parameters)
         elif tool_name == "enrich_property_qpublic":
             return await self._enrich_property_qpublic(**parameters)
+        elif tool_name == "search_ordinances":
+            return await self._search_ordinances(**parameters)
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
 
@@ -422,28 +506,81 @@ class AgentTools:
 
         # First, find the property by address if provided
         if property_address and not parcel_id:
-            # Search for property by address
+            # Use enhanced address matching
             from sqlalchemy import text
+            from src.utils.address_matcher import get_address_matcher
+
+            matcher = get_address_matcher()
+
+            # Strategy 1: Try normalized exact match
+            normalized = matcher.normalize_address(property_address)
             query = text("""
-                SELECT id, parcel_id
+                SELECT id, parcel_id, site_address
                 FROM bulk_property_records
-                WHERE LOWER(site_address) LIKE LOWER(:address)
+                WHERE LOWER(site_address) = LOWER(:address)
                 LIMIT 1
             """)
-            result = await self.session.execute(
-                query,
-                {'address': f'%{property_address}%'}
-            )
+            result = await self.session.execute(query, {'address': normalized})
             row = result.fetchone()
 
-            if not row:
-                return {
-                    'error': f'Property not found: {property_address}',
-                    'suggestion': 'Try different address format or use parcel_id'
-                }
+            if row:
+                property_id = str(row[0])
+                parcel_id = row[1]
+            else:
+                # Strategy 2: Try progressive fuzzy matching
+                search_queries = matcher.build_search_queries(property_address)
+                candidates = []
 
-            property_id = str(row[0])
-            parcel_id = row[1]
+                for search_query in search_queries:
+                    query = text("""
+                        SELECT id, parcel_id, site_address
+                        FROM bulk_property_records
+                        WHERE LOWER(site_address) LIKE :pattern
+                        LIMIT 10
+                    """)
+                    result = await self.session.execute(
+                        query,
+                        {'pattern': f'%{search_query}%'}
+                    )
+                    rows = result.fetchall()
+
+                    if rows:
+                        # Collect candidates
+                        for r in rows:
+                            candidates.append((str(r[0]), r[1], r[2]))
+                        break  # Stop at first successful query level
+
+                if not candidates:
+                    # No matches found at all
+                    return {
+                        'error': f'Property not found: {property_address}',
+                        'suggestion': 'Try different address format, verify street name/number, or use parcel_id',
+                        'normalized_query': normalized,
+                        'note': 'Address normalization attempted: street abbreviations, ordinals, and directionals standardized'
+                    }
+
+                # Strategy 3: Rank candidates by similarity
+                ranked = matcher.rank_matches(property_address, candidates)
+
+                # Take best match if score is high enough (>0.7)
+                best_match = ranked[0]
+                property_id, parcel_id, matched_address, score = best_match
+
+                if score < 0.7:
+                    # Score too low - provide suggestions
+                    top_suggestions = [
+                        {'address': addr, 'similarity': f'{sc:.0%}'}
+                        for _, _, addr, sc in ranked[:3]
+                    ]
+                    return {
+                        'error': f'No exact match for: {property_address}',
+                        'suggestion': 'Address may be misspelled or formatted differently. Did you mean one of these?',
+                        'possible_matches': top_suggestions,
+                        'note': 'Use exact address from suggestions or provide parcel_id for guaranteed match'
+                    }
+
+                # Good match found (score >= 0.7) - use it
+                # The property_id and parcel_id are already set from best_match above
 
         elif parcel_id:
             # Find by parcel_id
@@ -610,6 +747,62 @@ class AgentTools:
         except Exception as e:
             return {
                 'error': f'qPublic enrichment failed: {str(e)}'
+            }
+
+    async def _search_ordinances(
+        self,
+        query: str,
+        city: str = None,
+        top_k: int = 5,
+        min_relevance: float = 0.6
+    ) -> Dict[str, Any]:
+        """Search municipal ordinances using RAG"""
+
+        try:
+            # Get RAG service
+            rag = get_ordinance_rag()
+
+            # Search ordinances
+            results = await rag.search(
+                session=self.session,
+                query=query,
+                city=city,
+                top_k=top_k,
+                min_relevance=min_relevance
+            )
+
+            # Format results for agent
+            if not results:
+                return {
+                    'query': query,
+                    'city_filter': city,
+                    'results_found': 0,
+                    'message': f'No ordinances found matching "{query}"' + (f' in {city}' if city else ''),
+                    'suggestion': 'Try a broader query or remove city filter'
+                }
+
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    'city': result['city'],
+                    'relevance_score': result['relevance_score'],
+                    'text': result['chunk_text'],
+                    'source_file': result['ordinance_file'],
+                    'chunk_number': result['chunk_number'],
+                    'word_count': result['chunk_words']
+                })
+
+            return {
+                'query': query,
+                'city_filter': city,
+                'results_found': len(results),
+                'ordinances': formatted_results
+            }
+
+        except Exception as e:
+            return {
+                'error': f'Ordinance search failed: {str(e)}',
+                'query': query
             }
 
     async def _search_properties(

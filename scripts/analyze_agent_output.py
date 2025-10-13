@@ -1,159 +1,160 @@
 #!/usr/bin/env python3
-"""Analyze agent JSON output"""
+"""
+Analyze Agent Investment Output JSON
+"""
 
-import sys
 import json
+import sys
 from pathlib import Path
 
-def analyze_output(json_file):
-    """Analyze agent output JSON file"""
+def analyze_agent_output(json_file):
+    """Analyze agent output and print summary"""
 
     with open(json_file, 'r') as f:
         data = json.load(f)
 
     print("=" * 100)
-    print("AGENT OUTPUT ANALYSIS")
+    print("AGENT INVESTMENT ANALYSIS - COMPREHENSIVE SUMMARY")
     print("=" * 100)
     print()
 
-    # Basic info
-    print("QUERY CLASSIFICATION:")
-    print(f"  Query Type: {data.get('query_type', 'N/A')}")
-    print(f"  Recommendation: {data.get('recommendation', 'N/A')}")
-    print(f"  Deal Success: {data.get('deal_success_probability', 'N/A')}%")
+    # 1. Basic info
+    print("RECOMMENDATION:")
+    print(f"  Type: {data.get('recommendation', 'N/A')}")
     print(f"  Confidence: {data.get('confidence', 'N/A')}")
+    print(f"  Deal Success Probability: {data.get('deal_success_probability', 'N/A')}%")
     print()
 
-    # Error check
-    if 'error' in data:
-        print("ERROR OCCURRED:")
-        print(f"  {data['error']}")
-        print()
-        return
-
-    # Tool calls
-    tool_calls = data.get('tool_calls_made', [])
-    print(f"TOOL CALLS: {len(tool_calls)} total")
-    print()
-
-    for i, call in enumerate(tool_calls, 1):
-        tool_name = call.get('tool', 'unknown')
-        args = call.get('args', {})
-        result = call.get('result', {})
-
-        print(f"{i}. {tool_name}")
-        print(f"   Args: {args}")
-
-        # Summarize result based on tool
-        if tool_name == 'analyze_market':
-            if isinstance(result, dict):
-                print(f"   Result: {result.get('total_properties', 0):,} properties in market")
-                print(f"           {result.get('sales_last_year', 0):,} sales last year")
-
-        elif tool_name == 'analyze_entity':
-            if isinstance(result, dict):
-                print(f"   Result: {result.get('total_properties', 0):,} properties owned")
-                print(f"           Active in {result.get('markets_count', 0)} markets")
-
-        elif tool_name == 'get_entity_properties':
-            if isinstance(result, list):
-                print(f"   Result: Found {len(result)} properties")
-
-        elif tool_name == 'search_properties':
-            if isinstance(result, list):
-                print(f"   Result: Found {len(result)} available properties")
-                if result:
-                    values = [p.get('market_value', 0) for p in result if p.get('market_value')]
-                    if values:
-                        print(f"           Price range: ${min(values):,} - ${max(values):,}")
-
-        elif tool_name == 'analyze_property':
-            if isinstance(result, dict):
-                prop = result.get('property', {})
-                print(f"   Result: {prop.get('site_address', 'N/A')}")
-                print(f"           Value: ${prop.get('market_value', 0):,}")
-
+    # 2. Tool calls summary
+    if 'tool_calls_made' in data:
+        tool_calls = data['tool_calls_made']
+        print(f"TOOL CALLS MADE: {len(tool_calls)} total")
         print()
 
-    # Reasoning
+        # Count by tool
+        from collections import Counter
+        tool_counts = Counter(t.get('tool', 'unknown') for t in tool_calls)
+
+        print("Tool Usage:")
+        for tool_name, count in tool_counts.most_common():
+            print(f"  - {tool_name}: {count}x")
+        print()
+
+        # Check if search_ordinances was used
+        ordinance_calls = [t for t in tool_calls if t.get('tool') == 'search_ordinances']
+        if ordinance_calls:
+            print(f"[CRITICAL] search_ordinances WAS CALLED! ({len(ordinance_calls)} times)")
+            print()
+            print("Ordinance Searches:")
+            for i, call in enumerate(ordinance_calls, 1):
+                query = call.get('args', {}).get('query', 'N/A')
+                city = call.get('args', {}).get('city', 'All cities')
+                results_found = call.get('result', {}).get('results_found', 0)
+                print(f"  {i}. Query: '{query}'")
+                print(f"     City: {city}")
+                print(f"     Results: {results_found} ordinances")
+                print()
+        else:
+            print("[INFO] search_ordinances was NOT called")
+            print("  Agent determined ordinance search was not necessary for this query")
+            print()
+
+    # 3. Properties analyzed
+    if 'tool_calls_made' in data:
+        property_calls = [t for t in tool_calls if t.get('tool') == 'analyze_property']
+        if property_calls:
+            print(f"PROPERTIES ANALYZED: {len(property_calls)}")
+            for i, call in enumerate(property_calls[:10], 1):  # Show first 10
+                address = call.get('args', {}).get('property_address', 'N/A')
+                print(f"  {i}. {address}")
+            if len(property_calls) > 10:
+                print(f"  ... and {len(property_calls) - 10} more")
+            print()
+
+    # 4. Key reasoning (first 1500 chars)
     if 'reasoning' in data:
-        print("REASONING:")
         reasoning = data['reasoning']
-        # Print first 500 chars
-        if len(reasoning) > 500:
-            print(f"  {reasoning[:500]}...")
-            print(f"  (... {len(reasoning) - 500} more characters)")
-        else:
-            print(f"  {reasoning}")
+        print("AGENT REASONING:")
+        print("-" * 100)
+        print(reasoning[:1500])
+        if len(reasoning) > 1500:
+            print("...")
+            print()
+            print(f"(Full reasoning: {len(reasoning)} characters - see JSON file)")
+        print("-" * 100)
         print()
 
-    # Investment recommendation
-    if 'investment_recommendation' in data:
-        print("INVESTMENT RECOMMENDATION:")
-        rec = data['investment_recommendation']
-        if isinstance(rec, dict):
-            for key, value in rec.items():
+    # 5. Key factors
+    if 'key_factors' in data:
+        print("KEY FACTORS:")
+        factors = data['key_factors']
+        for key, value in factors.items():
+            if isinstance(value, str):
+                print(f"  {key}: {value[:150]}" + ("..." if len(value) > 150 else ""))
+            elif isinstance(value, list):
+                print(f"  {key}: ({len(value)} items)")
+                for item in value[:3]:  # Show first 3
+                    if isinstance(item, str):
+                        print(f"    - {item[:100]}")
+                    else:
+                        print(f"    - {item}")
+                if len(value) > 3:
+                    print(f"    ... and {len(value) - 3} more")
+            elif isinstance(value, dict):
+                print(f"  {key}:")
+                for k, v in list(value.items())[:3]:
+                    print(f"    {k}: {v}")
+            else:
                 print(f"  {key}: {value}")
-        else:
-            print(f"  {rec}")
         print()
 
-    # Summary
-    print("=" * 100)
-    print("VERIFICATION CHECKLIST:")
-    print("=" * 100)
+    # 6. Recommendations (if property list format)
+    if 'recommendations' in data:
+        recommendations = data['recommendations']
+        print(f"TOP RECOMMENDED PROPERTIES: {len(recommendations)}")
+        print()
+        for i, prop in enumerate(recommendations[:5], 1):  # Show top 5
+            print(f"{i}. {prop.get('address', 'N/A')}")
+            print(f"   Parcel: {prop.get('parcel_id', 'N/A')}")
+            print(f"   Market Value: ${prop.get('market_value', 0):,}")
+            print(f"   Lot Size: {prop.get('lot_size_acres', 0):.2f} acres")
+            print(f"   Priority: {prop.get('priority', 'N/A')}")
+            print(f"   Why: {prop.get('reasoning', 'N/A')[:200]}")
+            print()
 
-    checks = []
+        if len(recommendations) > 5:
+            print(f"... and {len(recommendations) - 5} more properties in JSON")
+            print()
 
-    # Check for hallucination
-    has_search = any(c.get('tool') == 'search_properties' for c in tool_calls)
-    has_analyze = any(c.get('tool') == 'analyze_property' for c in tool_calls)
-
-    if has_search:
-        checks.append(("Called search_properties()", "PASS", "Agent searched for available properties"))
-    else:
-        checks.append(("Called search_properties()", "FAIL", "Agent may have hallucinated without searching"))
-
-    if has_analyze:
-        checks.append(("Called analyze_property()", "PASS", "Agent verified property details"))
-    else:
-        checks.append(("Called analyze_property()", "WARN", "Agent may not have verified specific properties"))
-
-    # Check for proper workflow
-    has_market = any(c.get('tool') == 'analyze_market' for c in tool_calls)
-    if has_market:
-        checks.append(("Called analyze_market()", "PASS", "Agent got market context"))
-
-    has_entity = any(c.get('tool') == 'analyze_entity' for c in tool_calls)
-    if has_entity:
-        checks.append(("Called analyze_entity()", "PASS", "Agent researched smart money"))
-
+    # 7. Tool call sequence
+    print("TOOL CALL SEQUENCE:")
+    if 'tool_calls_made' in data:
+        for i, call in enumerate(tool_calls[:10], 1):  # Show first 10
+            tool = call.get('tool', 'unknown')
+            args_preview = str(call.get('args', {}))[:60]
+            print(f"  {i}. {tool}({args_preview}...)")
+        if len(tool_calls) > 10:
+            print(f"  ... and {len(tool_calls) - 10} more tool calls")
     print()
-    for check, status, note in checks:
-        symbol = "OK" if status == "PASS" else "FAIL" if status == "FAIL" else "WARN"
-        print(f"  [{symbol}] {check:<30} {status:<6} - {note}")
 
-    print()
     print("=" * 100)
+    print(f"FULL OUTPUT: {json_file}")
+    print(f"Size: {Path(json_file).stat().st_size:,} bytes")
+    print("=" * 100)
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python analyze_agent_output.py <json_file>")
+        # Find latest file
+        import glob
+        files = glob.glob("agent_investment_output_*.json")
+        if not files:
+            print("No agent output files found")
+            sys.exit(1)
+        json_file = max(files, key=lambda f: Path(f).stat().st_mtime)
+        print(f"Using latest file: {json_file}")
         print()
-        print("Available files:")
-        script_dir = Path(__file__).parent
-        json_files = list(script_dir.glob("agent_output_*.json"))
-        for f in sorted(json_files, reverse=True):
-            print(f"  {f.name}")
-        sys.exit(1)
+    else:
+        json_file = sys.argv[1]
 
-    json_file = Path(sys.argv[1])
-    if not json_file.exists():
-        # Try in scripts directory
-        json_file = Path(__file__).parent / json_file.name
-
-    if not json_file.exists():
-        print(f"Error: File not found: {json_file}")
-        sys.exit(1)
-
-    analyze_output(json_file)
+    analyze_agent_output(json_file)
