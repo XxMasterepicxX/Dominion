@@ -80,7 +80,7 @@ async def backfill_permits_parallel(market_config):
 
                 duration = (datetime.now() - start_time).total_seconds()
                 success = sum(1 for v in enrichment_map.values() if v)
-                print(f"  ✓ Enriched {success}/{len(contractors)} in {duration:.1f}s ({len(contractors)/duration:.1f} per sec)")
+                print(f"  [OK] Enriched {success}/{len(contractors)} in {duration:.1f}s ({len(contractors)/duration:.1f} per sec)")
             else:
                 enrichment_map = {}
 
@@ -141,7 +141,7 @@ async def backfill_permits_parallel(market_config):
                 total_duplicates += duplicates
                 total_errors += errors
 
-                print(f"  ✓ Batch complete: {ingested} new, {duplicates} duplicates, {errors} errors")
+                print(f"  [OK] Batch complete: {ingested} new, {duplicates} duplicates, {errors} errors")
 
         print(f"\n[OK] County Permits: {total_ingested} new, {total_duplicates} duplicates, {total_errors} errors")
         return {
@@ -210,7 +210,7 @@ async def backfill_city_permits_parallel(market_config):
                 enrichment_map = await parallel_enricher.enrich_batch(list(contractors))
                 duration = (datetime.now() - start_time).total_seconds()
                 success = sum(1 for v in enrichment_map.values() if v)
-                print(f"  ✓ Enriched {success}/{len(contractors)} in {duration:.1f}s")
+                print(f"  [OK] Enriched {success}/{len(contractors)} in {duration:.1f}s")
 
             # Process permits
             async with db_manager.get_session() as db_session:
@@ -247,7 +247,7 @@ async def backfill_city_permits_parallel(market_config):
                 total_duplicates += duplicates
                 total_errors += errors
 
-                print(f"  ✓ Batch complete: {ingested} new, {duplicates} duplicates, {errors} errors")
+                print(f"  [OK] Batch complete: {ingested} new, {duplicates} duplicates, {errors} errors")
 
         print(f"\n[OK] City Permits: {total_ingested} new, {total_duplicates} duplicates, {total_errors} errors")
         return {'total': len(permits), 'ingested': total_ingested, 'duplicates': total_duplicates, 'errors': total_errors}

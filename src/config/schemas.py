@@ -163,5 +163,5 @@ if __name__ == "__main__":
         )
     )
 
-    print("✓ Gainesville config validation passed")
+    print("[OK] Gainesville config validation passed")
     print(test_config.model_dump_json(indent=2))

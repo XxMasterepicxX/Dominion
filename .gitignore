@@ -26,6 +26,7 @@ MANIFEST
 # Virtual environments
 venv/
 venv_src/
+venv_emb/
 env/
 ENV/
 env.bak/
@@ -72,22 +73,25 @@ test_output/
 .pytest_cache/
 .coverage
 htmlcov/
-*.pyc
 
-# Data files
+# Data files (scraped ordinances, temp downloads)
+data/
 data/temp/
 data/cache/
+data/ordinances/
+data/ordinances_complete/
+data/ordinances_test/
 browser_data/
 *.csv
-*.json
-*.txt
+data/*.json
+data/*.txt
 
 # Bulk data downloads (large files)
 CAMA/
 publicparcels/
 
-# Documentation (session notes, analysis reports)
-docs/
+# Documentation - session notes only
+docs/archive/sessions/
 
 # Docker
 .dockerignore
@@ -107,3 +111,7 @@ temp/
 .claude/
 /.claude
 .claude/settings.local.json
+
+# Documentation
+docs/
+./docs

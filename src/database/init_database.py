@@ -26,7 +26,7 @@ async def create_all_tables():
         await conn.execute("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
         await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
         await conn.execute("CREATE EXTENSION IF NOT EXISTS fuzzystrmatch")
-    logger.info("✓ Extensions enabled")
+    logger.info("[OK] Extensions enabled")
 
     # Check existing tables
     async with dm.get_connection() as conn:
@@ -42,7 +42,7 @@ async def create_all_tables():
     async with dm.get_connection() as conn:
         try:
             await conn.execute("DROP INDEX IF EXISTS idx_properties_coordinates")
-            logger.info("✓ Old indexes dropped")
+            logger.info("[OK] Old indexes dropped")
         except Exception as e:
             logger.warning(f"Could not drop old indexes: {e}")
 
@@ -51,7 +51,7 @@ async def create_all_tables():
     try:
         async with dm.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all, checkfirst=True)
-        logger.info("✓ All tables created successfully!")
+        logger.info("[OK] All tables created successfully!")
     except Exception as e:
         logger.error(f"Error creating tables: {e}")
         await dm.close()
@@ -66,7 +66,7 @@ async def create_all_tables():
         """)
         final_table_names = [row['tablename'] for row in final_tables]
         new_count = len(final_table_names) - len(existing_table_names)
-        logger.info(f"✓ Database now has {len(final_table_names)} tables ({new_count} newly created)")
+        logger.info(f"[OK] Database now has {len(final_table_names)} tables ({new_count} newly created)")
         logger.info(f"Tables: {', '.join(final_table_names)}")
 
     await dm.close()

@@ -125,12 +125,12 @@ class DatabaseVerifier:
                 'today': today_meetings
             }
 
-            print(f"✓ Total meetings: {total}")
-            print(f"✓ With content (agenda/text): {with_content} ({content_pct:.1f}%)")
-            print(f"✓ Last 3 months: {last_3_months}")
+            print(f"[OK] Total meetings: {total}")
+            print(f"[OK] With content (agenda/text): {with_content} ({content_pct:.1f}%)")
+            print(f"[OK] Last 3 months: {last_3_months}")
             if date_range:
-                print(f"✓ Date range: {date_range['min_date']} to {date_range['max_date']}")
-            print(f"✓ Today's meetings: {today_meetings}")
+                print(f"[OK] Date range: {date_range['min_date']} to {date_range['max_date']}")
+            print(f"[OK] Today's meetings: {today_meetings}")
 
             # Check for issues
             if total == 0:
@@ -142,7 +142,7 @@ class DatabaseVerifier:
 
         except Exception as e:
             self.issues.append(f"CRITICAL: Council meetings test failed: {e}")
-            print(f"✗ Test failed: {e}")
+            print(f"[FAIL] Test failed: {e}")
 
     async def test_crime_data(self):
         """Test crime data - REAL data check."""
@@ -205,12 +205,12 @@ class DatabaseVerifier:
                 'weekly_counts': len(weekly_counts)
             }
 
-            print(f"✓ Total crimes: {total}")
-            print(f"✓ With coordinates: {with_coords} ({coords_pct:.1f}%)")
-            print(f"✓ Last 3 months: {last_3_months}")
+            print(f"[OK] Total crimes: {total}")
+            print(f"[OK] With coordinates: {with_coords} ({coords_pct:.1f}%)")
+            print(f"[OK] Last 3 months: {last_3_months}")
             if date_range:
-                print(f"✓ Date range: {date_range['min_date']} to {date_range['max_date']}")
-            print(f"✓ Weeks with data: {len(weekly_counts)}")
+                print(f"[OK] Date range: {date_range['min_date']} to {date_range['max_date']}")
+            print(f"[OK] Weeks with data: {len(weekly_counts)}")
 
             # Check for issues
             if total == 0:
@@ -224,7 +224,7 @@ class DatabaseVerifier:
 
         except Exception as e:
             self.issues.append(f"CRITICAL: Crime data test failed: {e}")
-            print(f"✗ Test failed: {e}")
+            print(f"[FAIL] Test failed: {e}")
 
     async def test_news_articles(self):
         """Test news articles - REAL data check."""
@@ -274,11 +274,11 @@ class DatabaseVerifier:
                 'sources': len(by_source)
             }
 
-            print(f"✓ Total articles: {total}")
-            print(f"✓ Last 3 months: {last_3_months}")
+            print(f"[OK] Total articles: {total}")
+            print(f"[OK] Last 3 months: {last_3_months}")
             if date_range:
-                print(f"✓ Date range: {date_range['min_date']} to {date_range['max_date']}")
-            print(f"✓ News sources: {len(by_source)}")
+                print(f"[OK] Date range: {date_range['min_date']} to {date_range['max_date']}")
+            print(f"[OK] News sources: {len(by_source)}")
             for source in by_source:
                 print(f"  - {source['source']}: {source['count']} articles")
 
@@ -290,7 +290,7 @@ class DatabaseVerifier:
 
         except Exception as e:
             self.issues.append(f"CRITICAL: News articles test failed: {e}")
-            print(f"✗ Test failed: {e}")
+            print(f"[FAIL] Test failed: {e}")
 
     async def test_business_journal(self):
         """Test business journal articles - REAL data check."""
@@ -307,7 +307,7 @@ class DatabaseVerifier:
             """, self.market_id)
             total = result[0]['count']
 
-            print(f"✓ Business articles: {total}")
+            print(f"[OK] Business articles: {total}")
 
             self.results['business_journal'] = {
                 'total': total
@@ -317,7 +317,7 @@ class DatabaseVerifier:
                 print("  (Note: May be in news_articles with different source name)")
 
         except Exception as e:
-            print(f"✗ Test failed: {e}")
+            print(f"[FAIL] Test failed: {e}")
 
     async def test_permits(self):
         """Test permits - REAL data check."""
@@ -365,12 +365,12 @@ class DatabaseVerifier:
                 'date_range': date_range
             }
 
-            print(f"✓ City permits: {city_total}")
-            print(f"✓ County permits: {county_total}")
-            print(f"✓ Total permits: {city_total + county_total}")
-            print(f"✓ Last 3 months: {last_3_months}")
+            print(f"[OK] City permits: {city_total}")
+            print(f"[OK] County permits: {county_total}")
+            print(f"[OK] Total permits: {city_total + county_total}")
+            print(f"[OK] Last 3 months: {last_3_months}")
             if date_range:
-                print(f"✓ Date range: {date_range['min_date']} to {date_range['max_date']}")
+                print(f"[OK] Date range: {date_range['min_date']} to {date_range['max_date']}")
 
             # Check for issues
             if city_total + county_total == 0:
@@ -380,7 +380,7 @@ class DatabaseVerifier:
 
         except Exception as e:
             self.issues.append(f"CRITICAL: Permits test failed: {e}")
-            print(f"✗ Test failed: {e}")
+            print(f"[FAIL] Test failed: {e}")
 
     async def test_bulk_llcs(self):
         """Test bulk LLC records - REAL data check."""
@@ -431,11 +431,11 @@ class DatabaseVerifier:
                 'latest_snapshot': latest_snapshot
             }
 
-            print(f"✓ Total LLCs: {total}")
-            print(f"✓ Filed in last 3 months: {last_3_months}")
-            print(f"✓ Snapshots: {snapshots}")
+            print(f"[OK] Total LLCs: {total}")
+            print(f"[OK] Filed in last 3 months: {last_3_months}")
+            print(f"[OK] Snapshots: {snapshots}")
             if latest_snapshot:
-                print(f"✓ Latest snapshot: {latest_snapshot}")
+                print(f"[OK] Latest snapshot: {latest_snapshot}")
 
             # Check for issues
             if total == 0:
@@ -447,7 +447,7 @@ class DatabaseVerifier:
 
         except Exception as e:
             self.issues.append(f"CRITICAL: Bulk LLC test failed: {e}")
-            print(f"✗ Test failed: {e}")
+            print(f"[FAIL] Test failed: {e}")
 
     async def test_bulk_properties(self):
         """Test bulk property records - REAL data check."""
@@ -502,10 +502,10 @@ class DatabaseVerifier:
                 'snapshots': snapshots
             }
 
-            print(f"✓ Total properties: {total}")
-            print(f"✓ With coordinates: {with_coords} ({coords_pct:.1f}%)")
-            print(f"✓ With sale data: {with_sales} ({sales_pct:.1f}%)")
-            print(f"✓ Snapshots: {snapshots}")
+            print(f"[OK] Total properties: {total}")
+            print(f"[OK] With coordinates: {with_coords} ({coords_pct:.1f}%)")
+            print(f"[OK] With sale data: {with_sales} ({sales_pct:.1f}%)")
+            print(f"[OK] Snapshots: {snapshots}")
 
             # Check for issues
             if total == 0:
@@ -517,7 +517,7 @@ class DatabaseVerifier:
 
         except Exception as e:
             self.issues.append(f"CRITICAL: Bulk property test failed: {e}")
-            print(f"✗ Test failed: {e}")
+            print(f"[FAIL] Test failed: {e}")
 
     async def test_data_quality(self):
         """Test data quality - check for nulls, duplicates."""
@@ -559,17 +559,17 @@ class DatabaseVerifier:
                 if pct > 10:
                     issues_found.append(f"{result[0]['count']} permits missing address ({pct:.1f}%)")
 
-            print(f"✓ Data quality checks completed")
+            print(f"[OK] Data quality checks completed")
             if issues_found:
-                print(f"⚠ Issues found:")
+                print(f"[WARN] Issues found:")
                 for issue in issues_found:
                     print(f"  - {issue}")
                 self.issues.extend(issues_found)
             else:
-                print(f"✓ No major data quality issues")
+                print(f"[OK] No major data quality issues")
 
         except Exception as e:
-            print(f"✗ Test failed: {e}")
+            print(f"[FAIL] Test failed: {e}")
 
     async def test_date_coverage(self):
         """Test date coverage - check for gaps."""
@@ -592,7 +592,7 @@ class DatabaseVerifier:
             days_with_crime = len(result)
             expected_days = 90
 
-            print(f"✓ Crime data: {days_with_crime}/{expected_days} days covered ({days_with_crime/expected_days*100:.1f}%)")
+            print(f"[OK] Crime data: {days_with_crime}/{expected_days} days covered ({days_with_crime/expected_days*100:.1f}%)")
 
             if days_with_crime < 70:
                 self.issues.append(f"WARNING: Crime data only covers {days_with_crime}/90 days")
@@ -606,13 +606,13 @@ class DatabaseVerifier:
                     gaps.append((dates[i], dates[i+1], gap))
 
             if gaps:
-                print(f"⚠ Found {len(gaps)} gaps of 7+ days in crime data:")
+                print(f"[WARN] Found {len(gaps)} gaps of 7+ days in crime data:")
                 for start, end, days in gaps[:5]:
                     print(f"  - {start} to {end}: {days} days")
                 self.issues.append(f"WARNING: {len(gaps)} gaps in crime data coverage")
 
         except Exception as e:
-            print(f"✗ Test failed: {e}")
+            print(f"[FAIL] Test failed: {e}")
 
     def print_summary(self):
         """Print comprehensive summary."""
@@ -621,7 +621,7 @@ class DatabaseVerifier:
         print("=" * 80)
 
         # Overall stats
-        print(f"\n📊 DATA COVERAGE:")
+        print(f"\nDATA COVERAGE:")
         for source, data in self.results.items():
             if isinstance(data, dict):
                 if 'total' in data:
@@ -640,33 +640,33 @@ class DatabaseVerifier:
                     backfill_complete = False
 
         # Issues
-        print(f"\n⚠️  ISSUES FOUND: {len(self.issues)}")
+        print(f"\n[WARN] ISSUES FOUND: {len(self.issues)}")
         if self.issues:
             critical = [i for i in self.issues if 'CRITICAL' in i]
             warnings = [i for i in self.issues if 'WARNING' in i]
 
             if critical:
-                print(f"\n🔴 CRITICAL ({len(critical)}):")
+                print(f"\n[CRITICAL] ({len(critical)}):")
                 for issue in critical:
                     print(f"  - {issue}")
 
             if warnings:
-                print(f"\n🟡 WARNINGS ({len(warnings)}):")
+                print(f"\n[WARNINGS] ({len(warnings)}):")
                 for issue in warnings:
                     print(f"  - {issue}")
         else:
-            print(f"  ✅ No issues found!")
+            print(f"  [OK] No issues found!")
 
         # Final verdict
         print(f"\n" + "=" * 80)
         if len([i for i in self.issues if 'CRITICAL' in i]) > 0:
-            print("VERDICT: ❌ CRITICAL ISSUES - NEEDS IMMEDIATE ATTENTION")
+            print("VERDICT: [FAIL] CRITICAL ISSUES - NEEDS IMMEDIATE ATTENTION")
         elif len(self.issues) > 5:
-            print("VERDICT: ⚠️  MULTIPLE ISSUES - NEEDS REVIEW")
+            print("VERDICT: [WARN] MULTIPLE ISSUES - NEEDS REVIEW")
         elif len(self.issues) > 0:
-            print("VERDICT: ✅ MOSTLY GOOD - MINOR ISSUES")
+            print("VERDICT: [OK] MOSTLY GOOD - MINOR ISSUES")
         else:
-            print("VERDICT: ✅ EXCELLENT - ALL TESTS PASSED")
+            print("VERDICT: [OK] EXCELLENT - ALL TESTS PASSED")
         print("=" * 80)
 
 

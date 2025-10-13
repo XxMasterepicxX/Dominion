@@ -6,7 +6,7 @@ Designed for real estate analyst teams, developers, and attorneys
 Crawls hierarchically to capture ALL real estate-related ordinances:
 1. Get all Parts/Titles from main TOC
 2. For each Part, get all Chapters/Articles/Divisions inside it
-3. Filter for comprehensive real estate keywords (200+)
+3. Filter for comprehensive real estate keywords (728)
 4. Scrape complete regulatory intelligence
 
 STRUCTURAL TYPES SUPPORTED:
@@ -52,7 +52,8 @@ REAL_ESTATE_KEYWORDS = [
     "setback", "yard requirement", "lot size", "lot coverage", "lot width",
     "density", "floor area ratio", "FAR", "height limit", "height restriction",
     "residential", "commercial", "industrial", "mixed-use", "agricultural",
-    "single-family", "multi-family", "townhouse", "duplex", "triplex",
+    "single-family", "multi-family", "multifamily", "townhouse", "duplex", "triplex",
+    "apartment", "apartment building", "apartment complex",
     "condominium", "mobile home", "manufactured housing",
     "nonconforming use", "legal nonconforming", "grandfathered",
     "vested rights", "development agreement", "development order",
@@ -71,6 +72,8 @@ REAL_ESTATE_KEYWORDS = [
     "concurrency", "adequate public facilities", "level of service",
     "vesting", "permit vesting", "development rights",
     "entitlement", "land entitlement", "development entitlement",
+    "site plan approval", "development permit", "land use permit",
+    "conditional use", "variance permit", "zoning variance",
 
     # === BUILDING & CONSTRUCTION ===
     "building", "construction", "building code", "building regulation",
@@ -81,8 +84,11 @@ REAL_ESTATE_KEYWORDS = [
     "contractor", "contractor licensing", "general contractor",
     "building official", "code enforcement", "enforcement",
     "foundation", "structural", "fire code", "fire safety",
-    "accessibility", "ADA", "disabled access", "barrier-free",
+    "fire-life-safety", "fire marshal", "fire inspection",
+    "accessibility", "ADA", "disabled access", "barrier-free", "ADA compliance",
     "energy code", "energy efficiency", "green building",
+    "solar", "solar panel", "solar energy", "photovoltaic", "PV system",
+    "solar installation", "renewable energy", "alternative energy",
 
     # === HOUSING & PROPERTY STANDARDS ===
     "housing code", "property maintenance", "maintenance code",
@@ -91,12 +97,43 @@ REAL_ESTATE_KEYWORDS = [
     "rental inspection", "rental licensing", "landlord",
     "tenant", "dwelling unit", "living conditions",
     "nuisance", "public nuisance", "nuisance abatement",
+    "noise", "noise ordinance", "sound level", "quiet hours", "noise complaint",
+    "light pollution", "outdoor lighting", "glare", "lighting standard",
     "blight", "blighted property", "property abandonment",
     "condemnation", "unsafe building", "dangerous building",
     "foreclosure", "tax delinquency", "vacant property",
     "affordable housing", "workforce housing", "inclusionary zoning",
+    "density bonus", "parking ratio", "parking requirement", "parking reduction",
+    "transit-oriented development", "TOD", "major transit stop", "transit station",
     "accessory dwelling unit", "ADU", "granny flat", "in-law unit",
+    "garage conversion", "garage apartment", "detached garage", "accessory garage",
+    "carriage house", "garage dwelling", "above-garage unit",
     "short-term rental", "vacation rental", "Airbnb",
+    "student housing", "dormitory", "dorm", "rooming house", "boarding house",
+    "co-living", "co-housing", "congregate living", "group living",
+    "micro-apartment", "microunit", "efficiency apartment",
+
+    # === ACCESSORY STRUCTURES & IMPROVEMENTS ===
+    "swimming pool", "pool", "spa", "hot tub", "jacuzzi", "pool enclosure",
+    "pool fence", "pool barrier", "pool safety",
+    "fence", "wall", "privacy fence", "chain link", "picket fence", "retaining wall",
+    "fence height", "fence material", "property line fence",
+    "shed", "storage shed", "tool shed", "outbuilding", "barn", "workshop",
+    "accessory structure", "accessory building", "detached structure",
+    "deck", "patio", "balcony", "veranda", "pergola", "gazebo", "pavilion",
+    "outdoor structure", "covered structure", "shade structure",
+    "driveway", "parking pad", "carport", "parking area", "driveway permit",
+    "paving", "pavement", "concrete pad", "asphalt",
+    "porch", "front porch", "back porch", "screened porch", "covered porch",
+    "addition", "home addition", "room addition", "expansion", "extension",
+    "basement", "finished basement", "walkout basement", "cellar", "crawl space",
+
+    # === VEHICLES & MOBILE DWELLINGS ===
+    "RV", "recreational vehicle", "camper", "trailer", "boat", "boat storage",
+    "RV parking", "vehicle storage", "boat parking", "trailer parking",
+    "inoperable vehicle", "abandoned vehicle", "junk vehicle",
+    "mobile dwelling", "park model", "tiny home", "tiny house", "mobile tiny home",
+    "manufactured home", "modular home", "prefab home",
 
     # === UTILITIES & INFRASTRUCTURE ===
     "utility", "public utility", "utility service", "utility extension",
@@ -106,7 +143,12 @@ REAL_ESTATE_KEYWORDS = [
     "stormwater", "stormwater management", "drainage", "storm drain",
     "electric", "electrical service", "power", "franchise",
     "gas", "natural gas", "telecommunications", "broadband",
+    "cell tower", "wireless facility", "telecommunications tower",
+    "5G", "small cell", "antenna", "monopole", "communication facility",
+    "wireless communication", "cellular tower", "radio tower",
     "utility capacity", "capacity analysis", "capacity reservation",
+    "EV charging", "electric vehicle charging", "charging station",
+    "EV infrastructure", "vehicle charging equipment", "EV charger",
     "connection fee", "tap fee", "utility deposit",
     "impact fee", "system development charge", "capital facility fee",
     "assessment", "special assessment", "benefit assessment",
@@ -124,19 +166,27 @@ REAL_ESTATE_KEYWORDS = [
     "flood damage prevention", "floodplain management", "base flood elevation",
     "coastal", "coastal zone", "coastal construction", "shoreline",
     "sea level rise", "climate adaptation", "resilience",
-    "tree protection", "tree preservation", "heritage tree",
-    "landscaping", "landscape requirement", "native vegetation",
+    "tree protection", "tree preservation", "heritage tree", "protected tree",
+    "tree removal", "tree permit", "tree replacement", "tree mitigation",
+    "landscaping", "landscape requirement", "native vegetation", "landscape buffer",
+    "lawn", "grass", "yard maintenance", "vegetation maintenance",
+    "irrigation", "sprinkler system", "water conservation",
     "open space", "green space", "recreation area",
     "endangered species", "habitat protection", "wildlife",
     "erosion", "soil erosion", "sediment control",
     "water quality", "surface water", "groundwater", "wellhead protection",
     "air quality", "emissions", "dust control",
     "contamination", "hazardous materials", "brownfield",
+    "environmental site assessment", "Phase I", "Phase II", "ESA",
+    "environmental compliance", "environmental review", "environmental impact",
     "solid waste", "waste management", "landfill", "recycling",
 
     # === BUSINESS & ECONOMIC DEVELOPMENT ===
     "business", "business regulation", "business license",
     "business tax", "occupational license", "commercial activity",
+    "certificate of use", "business permit", "operating permit",
+    "liquor license", "alcohol permit", "beer and wine", "alcoholic beverage",
+    "entertainment permit", "entertainment license", "live entertainment",
     "economic development", "community development", "redevelopment",
     "community redevelopment area", "CRA", "tax increment",
     "downtown", "downtown development", "urban core",
@@ -145,6 +195,25 @@ REAL_ESTATE_KEYWORDS = [
     "signage", "sign code", "sign permit", "sign regulation",
     "outdoor advertising", "billboard", "monument sign",
     "home occupation", "home business", "home-based business",
+    "restaurant", "food service", "eating establishment", "dining",
+    "fast food", "quick service", "drive-through", "drive-thru", "drive-in",
+    "outdoor dining", "outdoor seating", "sidewalk cafe", "patio dining",
+    "food truck", "mobile food vendor", "food cart", "mobile vending",
+    "street vendor", "mobile food unit",
+    "shopping center", "strip mall", "retail center", "commercial center",
+    "grocery store", "supermarket", "convenience store",
+    "bar", "tavern", "nightclub", "lounge", "brewery", "brewpub",
+    "hotel", "motel", "inn", "lodging", "accommodation",
+    "office", "office building", "professional office", "medical office",
+    "warehouse", "distribution center", "logistics facility", "fulfillment center",
+    "industrial park", "business park", "flex space", "flex warehouse",
+    "self-storage", "mini storage", "storage facility",
+    "car wash", "gas station", "service station", "fuel station",
+    "auto repair", "automotive service", "vehicle repair",
+    "cannabis", "marijuana", "dispensary", "medical marijuana", "MMTC",
+    "livestock", "farm animals", "chickens", "poultry", "beekeeping", "bees",
+    "urban agriculture", "backyard chickens", "animal keeping",
+    "kennel", "animal care", "pet care", "animal boarding",
 
     # === FEES & FINANCIAL ===
     "fee", "fee schedule", "application fee", "permit fee",
@@ -169,6 +238,8 @@ REAL_ESTATE_KEYWORDS = [
     # === PUBLIC FACILITIES ===
     "public facility", "community facility", "essential service",
     "school", "educational facility", "school site",
+    "daycare", "day care", "child care", "childcare facility", "child care center",
+    "nursery school", "preschool", "family daycare", "group daycare",
     "park", "recreation", "recreation facility", "playground",
     "library", "community center", "civic facility",
     "fire station", "police station", "emergency service",
@@ -178,6 +249,7 @@ REAL_ESTATE_KEYWORDS = [
     "transportation", "traffic", "traffic impact", "traffic study",
     "access", "site access", "driveway", "curb cut",
     "parking", "parking requirement", "parking space", "off-street parking",
+    "on-street parking", "parking lot", "parking garage", "parking structure",
     "loading", "loading zone", "service area", "delivery",
     "transit", "public transit", "bus stop", "transit-oriented development",
     "walkability", "pedestrian access", "pedestrian safety",
@@ -533,7 +605,7 @@ async def run_from_config(market_config: Optional['MarketConfig'] = None):
         return {"status": "disabled"}
 
     # Fetch municipalities dynamically from Municode API
-    print(f"🌐 Fetching municipalities from Municode API...")
+    print(f"[API] Fetching municipalities from Municode API...")
 
     if config.scope == "market":
         # Just the market city (e.g., Gainesville only)
@@ -568,7 +640,7 @@ async def run_from_config(market_config: Optional['MarketConfig'] = None):
         raise ValueError(f"Invalid scope: {config.scope}. Must be 'market', 'county', 'state', or 'custom'")
 
     if not test_cities:
-        print(f"⚠️  No municipalities found for scope '{config.scope}'")
+        print(f"[WARN] No municipalities found for scope '{config.scope}'")
         return {"status": "no_municipalities_found"}
 
     print("=" * 80)

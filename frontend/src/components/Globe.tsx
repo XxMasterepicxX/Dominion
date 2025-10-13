@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { COBEOptions } from 'cobe';
-import { useMotionValue, useSpring } from 'motion/react';
+import { useMotionValue, useSpring } from 'framer-motion';
 
 import { cn } from '../lib/cn';
 

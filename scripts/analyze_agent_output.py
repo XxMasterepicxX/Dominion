@@ -130,7 +130,7 @@ def analyze_output(json_file):
 
     print()
     for check, status, note in checks:
-        symbol = "✓" if status == "PASS" else "✗" if status == "FAIL" else "⚠"
+        symbol = "OK" if status == "PASS" else "FAIL" if status == "FAIL" else "WARN"
         print(f"  [{symbol}] {check:<30} {status:<6} - {note}")
 
     print()

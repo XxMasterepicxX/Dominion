@@ -92,16 +92,16 @@ if __name__ == "__main__":
 
     # Test 1: All FL
     all_fl = get_florida_municipalities()
-    print(f"\n✅ All Florida: {len(all_fl)} municipalities")
+    print(f"\n[OK] All Florida: {len(all_fl)} municipalities")
 
     # Test 2: Gainesville only
     gainesville = get_florida_municipalities(city_filter="Gainesville")
-    print(f"✅ Gainesville: {len(gainesville)} municipalities")
+    print(f"[OK] Gainesville: {len(gainesville)} municipalities")
     for m in gainesville:
         print(f"   - {m['name']}")
 
     # Test 3: Alachua County
     alachua = get_alachua_county_municipalities()
-    print(f"✅ Alachua County: {len(alachua)} municipalities")
+    print(f"[OK] Alachua County: {len(alachua)} municipalities")
     for m in alachua:
         print(f"   - {m['name']}")
