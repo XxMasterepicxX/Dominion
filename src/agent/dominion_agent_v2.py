@@ -39,15 +39,7 @@ logger = structlog.get_logger(__name__)
 
 
 def make_serializable(obj: Any) -> Any:
-    """
-    Convert objects to JSON-serializable format.
-
-    Handles:
-    - Decimal -> float
-    - datetime/date -> ISO string
-    - dict -> recursively serialize values
-    - list -> recursively serialize items
-    """
+    """Convert objects to JSON-serializable format (Decimal, datetime, nested structures)."""
     if isinstance(obj, Decimal):
         return float(obj)
     elif isinstance(obj, (datetime, date)):
@@ -64,7 +56,7 @@ def make_serializable(obj: Any) -> Any:
 
 
 class DominionAgent:
-    """Simplified AI agent with better tool integration"""
+    """AI property analysis agent using Gemini 2.5 Pro with tool calling and thinking mode."""
 
     def __init__(self, session: AsyncSession, api_key: Optional[str] = None):
         if not GENAI_AVAILABLE:
@@ -118,20 +110,7 @@ class DominionAgent:
         self.last_api_call = datetime.now()
 
     async def analyze(self, user_query: str) -> Dict[str, Any]:
-        """
-        Enhanced property analysis with Gemini 2.5 Pro thinking mode + grounding.
-
-        The agent autonomously decides whether to:
-        - Call analyze_property() for specific property questions
-        - Call search_properties() for strategic "where to buy" questions
-        - Call get_entity_properties() to analyze buyer patterns
-
-        Args:
-            user_query: User's question (any format - agent will interpret)
-
-        Returns:
-            Complete analysis with recommendations
-        """
+        """Run property analysis with autonomous tool calling."""
         logger.info("agent_analysis_started", query=user_query)
 
         # Classify query type to determine if tools are needed
@@ -145,24 +124,18 @@ class DominionAgent:
                    thinking_mode=True)
 
         try:
-            # Configure for strategic vs property-specific queries
             if is_strategic_query:
-                # Strategic query: Enable autonomous tool calling
-                # NOTE: Grounding (Google Search) is incompatible with function calling in Gemini API
-                # For now, prioritize database tools which provide comprehensive real estate data
-
                 config = types.GenerateContentConfig(
                     system_instruction=self.system_instruction,
                     thinking_config=types.ThinkingConfig(
-                        thinking_budget=-1,  # Dynamic: adapts to query complexity
-                        include_thoughts=True  # Capture reasoning for learning
+                        thinking_budget=-1,
+                        include_thoughts=True
                     ),
-                    temperature=0.7,  # Optimal for analytical reasoning (Google 2025 best practice)
-                    # No max_output_tokens: Let model write comprehensive analysis (2.5 Pro supports 64k)
+                    temperature=0.7,
                     tools=self._convert_tools_to_gemini_format(),
                     tool_config=types.ToolConfig(
                         function_calling_config=types.FunctionCallingConfig(
-                            mode='AUTO'  # Autonomous tool selection
+                            mode='AUTO'
                         )
                     )
                 )
@@ -176,15 +149,13 @@ class DominionAgent:
                 result = await self._execute_with_tools(prompt, config)
 
             else:
-                # Property-specific query: May still need tools for data lookup
                 config = types.GenerateContentConfig(
                     system_instruction=self.system_instruction,
                     thinking_config=types.ThinkingConfig(
-                        thinking_budget=-1,  # Dynamic thinking for best analysis
-                        include_thoughts=True  # Capture reasoning
+                        thinking_budget=-1,
+                        include_thoughts=True
                     ),
-                    temperature=0.7,  # Analytical depth for complex real estate decisions
-                    # No max_output_tokens: Allow comprehensive property analysis
+                    temperature=0.7,
                     tools=self._convert_tools_to_gemini_format(),
                     tool_config=types.ToolConfig(
                         function_calling_config=types.FunctionCallingConfig(
@@ -197,7 +168,6 @@ class DominionAgent:
                            thinking_budget="dynamic",
                            output_tokens="unlimited")
 
-                # Execute with tool calling (tools available for both query types)
                 result = await self._execute_with_tools(prompt, config)
 
             # Add metadata
@@ -223,21 +193,9 @@ class DominionAgent:
             }
 
     def _classify_query(self, user_query: str) -> bool:
-        """
-        Classify if query is strategic (needs extensive tool usage) vs specific (targeted analysis).
-
-        Strategic queries: "Where should I buy?", "Find something to invest in", "What is [ENTITY] buying?"
-        Specific queries: "Should I buy [ADDRESS]?", "Analyze [ADDRESS]"
-
-        Args:
-            user_query: User's natural language query
-
-        Returns:
-            True if strategic query, False if specific property query
-        """
+        """Classify if query is strategic (broad search) vs specific (single property)."""
         query_lower = user_query.lower()
 
-        # Strategic query patterns (general investment search, entity research, pattern analysis)
         strategic_patterns = [
             'where should i buy',
             'what should i buy',
@@ -259,32 +217,19 @@ class DominionAgent:
             'best area to buy'
         ]
 
-        # Check for strategic patterns
         if any(pattern in query_lower for pattern in strategic_patterns):
             return True
 
-        # Check for specific address pattern (property-specific query)
         address_pattern = r'\d+\s+[A-Za-z\s]+(?:St(?:reet)?|Ave(?:nue)?|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Ct|Court|Pl|Place)'
         if re.search(address_pattern, user_query, re.IGNORECASE):
             return False
 
-        # Default to strategic (safer to enable tools)
         return True
 
     def _build_analysis_prompt(self, user_query: str) -> str:
-        """
-        Build dynamic analysis prompt based on query.
-        No hardcoded text - agent decides tool usage autonomously.
-
-        Args:
-            user_query: User's natural language query
-
-        Returns:
-            Formatted prompt for Gemini
-        """
+        """Build analysis prompt with institutional framework."""
         market_name = CurrentMarket.get_name()
 
-        # Build prompt dynamically with institutional analysis framework
         prompt = f"""Real Estate Analysis Request
 
 Market: {market_name}
@@ -292,7 +237,6 @@ Query: {user_query}
 
 INSTITUTIONAL ANALYSIS APPROACH:
 1. Gather comprehensive data using tools
-   Note: Tools apply basic price filters to exclude obvious data errors (sales outside $1k-$10M range)
 2. Calculate key ratios and patterns from raw data:
    - Permit-to-sales ratio (permits issued / sales completed)
    - Sales velocity (properties sold per month)
@@ -338,7 +282,7 @@ Output Format:
             # New SDK structure
             if hasattr(response, 'candidates') and response.candidates:
                 candidate = response.candidates[0]
-                if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts') and candidate.content.parts:
                     for part in candidate.content.parts:
                         # Check for thoughts
                         if hasattr(part, 'thought') and part.thought:
@@ -402,20 +346,7 @@ Output Format:
         }
 
     def _convert_tools_to_gemini_format(self) -> List[Dict[str, Any]]:
-        """
-        Convert tool definitions to Gemini function calling format.
-
-        Gemini expects tools in this format:
-        {
-            "function_declarations": [
-                {
-                    "name": "tool_name",
-                    "description": "tool description",
-                    "parameters": {...}
-                }
-            ]
-        }
-        """
+        """Convert tool definitions to Gemini function calling format."""
         function_declarations = []
 
         for tool in TOOL_DEFINITIONS:
@@ -432,51 +363,33 @@ Output Format:
         prompt: str,
         config: types.GenerateContentConfig
     ) -> Dict[str, Any]:
-        """
-        Execute query with autonomous tool calling.
-
-        Implements tool execution loop:
-        1. Send query with tools enabled
-        2. Check for tool calls in response
-        3. Execute tools
-        4. Send results back to Gemini
-        5. Repeat until final answer
-
-        Args:
-            prompt: User query
-            config: Gemini config with tools enabled
-
-        Returns:
-            Final analysis result
-        """
+        """Execute query with autonomous tool calling loop."""
         conversation = []
         conversation.append({'role': 'user', 'parts': [{'text': prompt}]})
 
-        max_iterations = 15  # Increased from 5 to allow strategic queries to complete
+        max_iterations = 30
         tool_calls_made = []
+        vacant_land_found = False
+        ordinances_checked = False
 
         for iteration in range(max_iterations):
             logger.info("tool_calling_iteration",
                        iteration=iteration + 1,
                        max=max_iterations)
 
-            # Apply rate limiting before API call
             await self._apply_rate_limit()
 
-            # Call Gemini
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=conversation,
                 config=config
             )
 
-            # Check for tool calls
             if hasattr(response, 'candidates') and response.candidates:
                 candidate = response.candidates[0]
                 if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
                     parts = candidate.content.parts
 
-                    # Check if any part is a function call
                     has_function_call = False
                     for part in parts:
                         if hasattr(part, 'function_call') and part.function_call:
@@ -487,7 +400,6 @@ Output Format:
                                        tool=tool_call.name,
                                        args=dict(tool_call.args))
 
-                            # Execute tool
                             try:
                                 result = await self.tools.execute_tool(
                                     tool_call.name,
@@ -499,7 +411,21 @@ Output Format:
                                     'result': result
                                 })
 
-                                # Add model response to conversation
+                                if tool_call.name == 'analyze_property':
+                                    if isinstance(result, dict) and 'property' in result:
+                                        prop = result['property']
+                                        classification = prop.get('classification', {})
+                                        prop_type = classification.get('property_type', prop.get('property_type', '')).upper()
+                                        if 'VACANT' in prop_type:
+                                            vacant_land_found = True
+                                            logger.info("vacant_land_detected",
+                                                       parcel_id=prop.get('parcel_id'),
+                                                       property_type=prop_type)
+
+                                elif tool_call.name == 'search_ordinances':
+                                    ordinances_checked = True
+                                    logger.info("ordinances_checked")
+
                                 conversation.append({
                                     'role': 'model',
                                     'parts': [{'function_call': {
@@ -508,7 +434,6 @@ Output Format:
                                     }}]
                                 })
 
-                                # Add function result (serialize to handle Decimal, datetime, etc.)
                                 conversation.append({
                                     'role': 'user',
                                     'parts': [{'function_response': {
@@ -522,7 +447,6 @@ Output Format:
                                            tool=tool_call.name,
                                            error=str(e))
 
-                                # Send error back to Gemini
                                 conversation.append({
                                     'role': 'user',
                                     'parts': [{'function_response': {
@@ -532,18 +456,54 @@ Output Format:
                                 })
 
                     if not has_function_call:
-                        # Final answer
+                        if vacant_land_found and not ordinances_checked:
+                            logger.warning("vacant_land_without_ordinances",
+                                          message="Forcing ordinance check for vacant land")
+
+                            forced_prompt = """CRITICAL SAFETY REQUIREMENT VIOLATION DETECTED:
+
+You analyzed vacant land properties but did NOT verify zoning/ordinance compliance.
+This is UNACCEPTABLE for professional real estate due diligence.
+
+You MUST now call search_ordinances to verify regulatory feasibility before providing recommendations.
+
+Query the ordinances for:
+- Zoning regulations for the vacant land properties you analyzed
+- Minimum lot size requirements
+- Development restrictions and requirements
+
+City: Gainesville (or appropriate city for the properties)
+
+This is NOT optional. This is a MANDATORY safety check."""
+
+                            conversation.append({
+                                'role': 'user',
+                                'parts': [{'text': forced_prompt}]
+                            })
+
+                            forced_config = types.GenerateContentConfig(
+                                system_instruction=self.system_instruction,
+                                temperature=0.7,
+                                tools=self._convert_tools_to_gemini_format(),
+                                tool_config=types.ToolConfig(
+                                    function_calling_config=types.FunctionCallingConfig(
+                                        mode='ANY',
+                                        allowed_function_names=['search_ordinances']
+                                    )
+                                )
+                            )
+
+                            logger.info("forcing_ordinance_check",
+                                       mode='ANY',
+                                       allowed_functions=['search_ordinances'])
+
+                            config = forced_config
+                            continue
+
                         result = self._parse_response(response)
                         result['tool_calls_made'] = tool_calls_made
                         return result
 
-                    # Rate limit: Wait 30 seconds between iterations (2 requests/minute free tier)
-                    # TODO: Remove this delay when upgraded to paid tier
-                    if iteration < max_iterations - 1:  # Don't sleep on last iteration
-                        logger.info("rate_limit_delay", seconds=30, reason="gemini_free_tier")
-                        await asyncio.sleep(30)
-
-        # Max iterations reached
         logger.warning("max_tool_iterations_reached", iterations=max_iterations)
         return {
             'error': 'Max tool calling iterations reached',

@@ -480,10 +480,142 @@ class MarketAnalyzer:
                 )
             }
 
+        # Add geographic clustering for each buyer
+        for buyer in active_buyers:
+            clustering = await self._analyze_buyer_geographic_focus(
+                entity_id=buyer['entity_id'],
+                entity_name=buyer['entity_name'],
+                market_id=market_id,
+                recent_days=recent_days
+            )
+            buyer['geographic_concentration'] = clustering
+
         return {
             'active_buyers': active_buyers,
             'investor_concentration': concentration,
             'period_days': recent_days
+        }
+
+    async def _analyze_buyer_geographic_focus(
+        self,
+        entity_id: str,
+        entity_name: str,
+        market_id: str,
+        recent_days: int = 180
+    ) -> Dict[str, Any]:
+        """
+        Analyze where a buyer concentrates their acquisitions geographically.
+
+        Returns geographic clustering data showing which areas of the market
+        this buyer is most active in.
+        """
+        from collections import defaultdict
+
+        recent_date = datetime.now() - timedelta(days=recent_days)
+
+        # Get buyer's recent properties with locations
+        query = text("""
+            SELECT
+                bp.site_address,
+                bp.latitude,
+                bp.longitude,
+                bp.last_sale_date
+            FROM bulk_property_records bp
+            WHERE bp.market_id = :market_id
+              AND bp.owner_name = :entity_name
+              AND bp.last_sale_date >= :recent_date
+              AND bp.latitude IS NOT NULL
+              AND bp.longitude IS NOT NULL
+        """)
+
+        result = await self.session.execute(
+            query,
+            {
+                'market_id': market_id,
+                'entity_name': entity_name,
+                'recent_date': recent_date
+            }
+        )
+
+        properties = []
+        for row in result:
+            properties.append({
+                'address': row[0],
+                'lat': float(row[1]) if row[1] else None,
+                'lng': float(row[2]) if row[2] else None,
+                'date': row[3]
+            })
+
+        if not properties:
+            return {
+                'has_geographic_data': False,
+                'property_count': 0
+            }
+
+        # Analyze geographic clustering by extracting area patterns from addresses
+        area_counts = defaultdict(int)
+        street_patterns = defaultdict(int)
+
+        for prop in properties:
+            address = prop['address']
+            if not address:
+                continue
+
+            # Extract directional area (SW, NE, etc.)
+            address_upper = address.upper()
+            if 'SW' in address_upper:
+                area_counts['SW'] += 1
+            elif 'SE' in address_upper:
+                area_counts['SE'] += 1
+            elif 'NW' in address_upper:
+                area_counts['NW'] += 1
+            elif 'NE' in address_upper:
+                area_counts['NE'] += 1
+            elif 'NORTH' in address_upper:
+                area_counts['N'] += 1
+            elif 'SOUTH' in address_upper:
+                area_counts['S'] += 1
+            elif 'EAST' in address_upper:
+                area_counts['E'] += 1
+            elif 'WEST' in address_upper:
+                area_counts['W'] += 1
+
+            # Extract street name patterns (for more granular clustering)
+            parts = address.split(',')[0].strip().split()
+            if len(parts) >= 2:
+                # Get street name (last 1-2 words before comma)
+                street = ' '.join(parts[-2:]) if len(parts) >= 2 else parts[-1]
+                street_patterns[street] += 1
+
+        # Calculate concentration
+        total = len(properties)
+
+        # Find primary area
+        sorted_areas = sorted(area_counts.items(), key=lambda x: x[1], reverse=True)
+
+        clustered_areas = []
+        for area, count in sorted_areas[:3]:  # Top 3 areas
+            clustered_areas.append({
+                'area': area,
+                'property_count': count,
+                'percentage': round((count / total) * 100, 1)
+            })
+
+        # Calculate concentration score (what % in top area)
+        concentration_score = (sorted_areas[0][1] / total) if sorted_areas else 0
+
+        # Identify top streets (shows even more granular clustering)
+        top_streets = sorted(street_patterns.items(), key=lambda x: x[1], reverse=True)[:5]
+
+        return {
+            'has_geographic_data': True,
+            'property_count': total,
+            'clustered_areas': clustered_areas,
+            'concentration_score': round(concentration_score, 2),
+            'top_streets': [
+                {'street': street, 'count': count}
+                for street, count in top_streets
+            ] if top_streets else []
         }
 
     async def _get_market_trends(

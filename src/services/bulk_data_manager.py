@@ -476,13 +476,13 @@ class BulkDataManager:
                         status = EXCLUDED.status
                 """), {
                     'doc_num': record.get('document_number'),
-                    'name': record.get('entity_name'),  # entity_name from scraper → name in schema v2
+                    'name': record.get('entity_name'),  # entity_name from scraper -> name in schema v2
                     'filing_date': filing_date,
                     'status': record.get('status', 'ACTIVE'),
-                    'filing_type': record.get('entity_type'),  # entity_type from scraper → filing_type in schema v2
+                    'filing_type': record.get('entity_type'),  # entity_type from scraper -> filing_type in schema v2
                     'principal_address': record.get('principal_address'),
                     'mailing_address': record.get('mailing_address'),
-                    'registered_agent': record.get('registered_agent_name'),  # Map registered_agent_name → registered_agent
+                    'registered_agent': record.get('registered_agent_name'),  # Map registered_agent_name -> registered_agent
                     'snapshot_id': str(snapshot['id'])
                 })
 

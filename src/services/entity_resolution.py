@@ -5,7 +5,7 @@ Strategy:
 1. Tier 1: Definitive keys (document #, tax ID) - 99.9% confidence
 2. Tier 2: Multi-signal scoring with context awareness - 70-95% confidence
 3. Tier 3: LLM zero-shot for uncertain cases - human-level reasoning
-4. All decisions logged → training data for Week 3 ML model
+4. All decisions logged -> training data for Week 3 ML model
 
 Design principles:
 - No hardcoded abbreviation lists
@@ -490,7 +490,7 @@ class EntityResolver:
         # =============================================
         # CONTRADICTION CHECK: Different Document Numbers
         # =============================================
-        # If both have document numbers and they're different → DIFFERENT entities
+        # If both have document numbers and they're different -> DIFFERENT entities
         # (e.g., dissolved company name reused)
         scraped_doc = features.get('document_number')
         candidate_doc = candidate_attrs.get('document_number')
@@ -757,8 +757,8 @@ class EntityResolver:
         Check if registered agent is a known service or unique agent
 
         CRITICAL NEGATIVE SIGNAL:
-        - If both entities use CT Corporation System → Different companies (not related)
-        - If both use rare agent "John Smith Law Office" → Might be same company
+        - If both entities use CT Corporation System -> Different companies (not related)
+        - If both use rare agent "John Smith Law Office" -> Might be same company
 
         Args:
             scraped_agent: Registered agent from scraped data
@@ -1023,10 +1023,10 @@ Return JSON with:
         Normalize address using usaddress library for better accuracy
 
         Handles:
-        - Directional abbreviations (West → W, North → N)
-        - Street type abbreviations (Avenue → AVE, Street → ST)
-        - Unit numbers (Apt 5B → #5B)
-        - Fractional addresses (1234½ → 1234 1/2)
+        - Directional abbreviations (West -> W, North -> N)
+        - Street type abbreviations (Avenue -> AVE, Street -> ST)
+        - Unit numbers (Apt 5B -> #5B)
+        - Fractional addresses (1234½ -> 1234 1/2)
 
         Returns normalized address string for matching
         """

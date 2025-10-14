@@ -36,7 +36,7 @@ from sqlalchemy import select, update, text
 from sqlalchemy.dialects.postgresql import insert
 
 
-# Column mapping: CSV column → Database column
+# Column mapping: CSV column -> Database column
 COLUMN_MAPPING = {
     # Identifiers
     'Parcel': 'parcel_id',

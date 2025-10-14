@@ -22,9 +22,9 @@ class SunbizEnrichmentService:
     Enrich entities with Sunbiz data.
 
     Handles:
-    - Company names (LLC, INC, CORP) → Search by entity name
-    - Person names → Search by officer/registered agent
-    - Document numbers → Direct lookup
+    - Company names (LLC, INC, CORP) -> Search by entity name
+    - Person names -> Search by officer/registered agent
+    - Document numbers -> Direct lookup
     - Fuzzy matching when multiple results
     """
 

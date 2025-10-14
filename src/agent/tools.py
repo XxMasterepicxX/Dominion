@@ -2,13 +2,20 @@
 Agent Tool Definitions
 
 Defines tools (functions) that the agent can call using Gemini's function calling.
-Research shows limiting to 8-10 tools max for best performance. We have 3.
+Research shows limiting to 8-10 tools max for best performance. We have 10.
 """
 
 from typing import Dict, Any, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.intelligence.analyzers import PropertyAnalyzer, EntityAnalyzer, MarketAnalyzer, PropertySearchAnalyzer
+from src.intelligence.analyzers import (
+    PropertyAnalyzer,
+    EntityAnalyzer,
+    MarketAnalyzer,
+    PropertySearchAnalyzer,
+    LocationAnalyzer,
+    ComparableSalesAnalyzer
+)
 from src.services.sunbiz_enrichment import SunbizEnrichmentService
 from src.services.qpublic_enrichment import QPublicEnrichmentService
 from src.services.ordinance_rag import get_ordinance_rag
@@ -287,7 +294,7 @@ EXAMPLES (illustrative only - adapt to user's actual query):
                 },
                 "area": {
                     "type": "string",
-                    "description": "Geographic area from address (e.g., 'SW', 'NW 127th')"
+                    "description": "Geographic area to filter by (e.g., 'SW', 'NW', 'NE', 'SE'). Use this to match properties to buyer's geographic_concentration from analyze_market results."
                 },
                 "owner_type": {
                     "type": "string",
@@ -380,46 +387,79 @@ TOOL EFFICIENCY:
     },
     {
         "name": "search_ordinances",
-        "description": """Search municipal ordinances and zoning codes using natural language queries.
+        "description": """Search municipal ordinances and zoning codes using semantic search over 2,588 ordinance chunks from 9 cities.
 
 WHEN TO USE:
-- User asks about zoning regulations, building codes, or municipal rules
-- User asks "Can I...?" questions about property use (e.g., "Can I build a duplex?", "Can I operate a business?")
-- User asks about permit requirements, setbacks, parking, height limits, etc.
-- After analyze_property() to check if planned use is allowed by zoning
-- To understand what's allowed/prohibited for a specific property or zone
+
+TYPICAL USE CASES:
+- Vacant land analysis (verify zoning, lot size, setbacks, subdivision rules, development constraints)
+- User asks "Can I...?" questions (build duplex, operate business, build ADU, subdivide lot)
+- Development/construction feasibility questions
+- Property has zoning code - verify allowed uses
+- Parking requirements (multifamily, commercial)
+- Environmental/historic constraints
+- Permit process understanding
+
+INDUSTRY CONTEXT:
+Professional investors typically verify regulatory feasibility for vacant land to reduce risk of deal failure.
 
 WHAT IT RETURNS:
-- Relevant ordinance sections with exact legal text
-- City-specific regulations (automatically filtered if city is known)
-- Relevance scores showing how well each result matches the query
+- Ordinance text chunks (exact legal language from actual ordinances)
+- Relevance scores (0.6-0.75+ typical for good matches)
+- Source file and city for each result
+- Top 3-5 most relevant sections
 
-LOCATION FILTERING:
-- If user mentions a city (e.g., "in Gainesville"), specify city parameter
-- If querying about a specific property, use the property's city
-- If no city specified, searches all municipalities in the county
+QUERY CONSTRUCTION:
 
-AVAILABLE CITIES:
-- Gainesville, Alachua County, Alachua, Hawthorne, Archer, Newberry, High Springs, Micanopy, Waldo
+EFFECTIVE PATTERNS:
+- Specific queries with context: Include zoning code or use type
+- Use-based queries: Focus on intended use or activity
+- Requirement queries: Ask about specific dimensional or procedural requirements
+- Process queries: Ask about approval or application processes
 
-EXAMPLE QUERIES:
-- "What are setback requirements?" - Returns setback regulations
-- "Can I build a duplex in R1 zoning?" - Returns residential zoning rules
-- "What permits do I need for renovation?" - Returns permit requirements
-- "parking requirements for multifamily" - Returns parking regulations
-- "Are accessory dwelling units allowed?" - Returns ADU regulations
+LESS EFFECTIVE:
+- Single words without context
+- Overly broad terms
 
-IMPORTANT:
-- This searches the ACTUAL ordinance text, not summaries
-- Results include exact legal citations and requirements
-- Use this BEFORE telling user what's allowed/prohibited
-- Don't guess at regulations - search and cite the ordinance""",
+CITY FILTERING (9 cities available):
+
+WITH CITY FILTER:
+- Property location known: Use city from property data
+- User mentions specific city: Use that city parameter
+- Comparing regulations: Multiple searches with different cities
+
+NO FILTER:
+- Comparing across jurisdictions
+- Location not specified
+- Retry if filtered search returns insufficient results
+
+VACANT LAND CONSIDERATIONS:
+Typical topics to research for vacant land:
+- Zoning allowed uses and restrictions
+- Dimensional requirements (lot size, setbacks, coverage)
+- Subdivision and lot split regulations
+- Development constraints and overlay districts
+- Approval processes and permit requirements
+
+INTERPRETING RESULTS:
+- Relevance 0.70+: High confidence match (directly answers query)
+- Relevance 0.60-0.69: Good match (related, may need interpretation)
+- Relevance <0.60: Weak match (try rephrasing or broadening query)
+- No results: Broaden query, remove city filter, or state "verification needed"
+
+CITING IN RECOMMENDATIONS:
+- Quote specific requirements from ordinance text
+- Include relevance score for transparency on match quality
+- Reference source city and file
+- Note if professional verification recommended when results uncertain
+
+NOTE: This searches ACTUAL ordinance text with citations, not AI summaries. Results are real legal requirements.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Natural language query about ordinances (e.g., 'setback requirements', 'parking for multifamily', 'can I build a duplex')"
+                    "description": "Natural language query about ordinances (specific queries with context work best)"
                 },
                 "city": {
                     "type": "string",
@@ -435,6 +475,248 @@ IMPORTANT:
                 }
             },
             "required": ["query"]
+        }
+    },
+    {
+        "name": "analyze_location",
+        "description": """Analyze geographic and spatial aspects of properties and markets.
+
+CAPABILITIES:
+
+1. FIND NEARBY PROPERTIES
+   Find properties within radius of a location:
+   - Search around specific property (use property_id)
+   - Search around coordinates (use latitude/longitude)
+   - Filter by property type, price range
+   - Returns properties sorted by distance
+
+   Use cases:
+   - "Find vacant land near where D.R. Horton is building"
+   - "Properties within 1 mile of [address]"
+   - "Land near [investor's] other properties"
+
+2. DETECT GROWTH HOTSPOTS
+   Find areas with concentrated development activity:
+   - High permit concentration
+   - Active sales activity
+   - Multiple investor presence
+   - Returns hotspot areas with activity scores
+
+   Use cases:
+   - "Where is development happening?"
+   - "Find emerging growth areas"
+   - "Areas with high investor activity"
+
+3. ANALYZE NEIGHBORHOOD
+   Get aggregate metrics for geographic area:
+   - Property values and distribution
+   - Ownership patterns (owner vs investor)
+   - Property type mix
+   - Recent activity (sales and permits)
+
+   Use cases:
+   - "What's the neighborhood like around this property?"
+   - "Property values in this area"
+   - "Is this area mostly owner-occupied or investor-owned?"
+
+PARAMETERS:
+
+analysis_type (required): Type of analysis to perform
+  - "nearby_properties": Find properties near location
+  - "growth_hotspots": Detect areas with high activity
+  - "neighborhood": Analyze area characteristics
+
+For nearby_properties:
+  - target_property_id OR (target_latitude + target_longitude): Center point
+  - radius_miles: Search radius (suggest: 0.5-2.0 miles)
+  - property_type: Optional filter (e.g., "VACANT")
+  - min_price, max_price: Optional price filters
+
+For growth_hotspots:
+  - market_id: Market to analyze (e.g., "gainesville_fl")
+  - min_activity_score: Threshold for hotspot (suggest: 0.6-0.8)
+  - lookback_days: Days to analyze (suggest: 90-180)
+
+For neighborhood:
+  - latitude, longitude: Center point
+  - radius_miles: Neighborhood radius (suggest: 0.3-0.5 miles)
+
+LOCATION CONTEXT (INDUSTRY PRACTICE):
+
+Real estate is local - "location, location, location":
+- Proximity to active development increases value and exit probability
+- Growth hotspots indicate market momentum and investor confidence
+- Neighborhood characteristics affect investment viability
+- Properties near successful investors often have better fundamentals
+
+STRATEGIC APPLICATIONS:
+
+Following Developer Strategy (TYPE 2 queries):
+- Use nearby_properties to find available properties near developer's portfolio
+- Use growth_hotspots to identify where developers are concentrating activity
+- Match property location to buyer's geographic focus from analyze_entity
+
+Exit Strategy Validation:
+- Verify exit buyer is active NEAR the subject property
+- Properties outside buyer's geographic focus have lower exit probability
+- Proximity to buyer's other properties suggests acquisition interest
+
+Market Opportunity Discovery:
+- Growth hotspots reveal emerging submarkets before they're obvious
+- Properties near hotspots may benefit from spillover development
+- Areas with high investor activity indicate market validation""",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "analysis_type": {
+                    "type": "string",
+                    "enum": ["nearby_properties", "growth_hotspots", "neighborhood"],
+                    "description": "Type of location analysis to perform"
+                },
+                "target_property_id": {
+                    "type": "string",
+                    "description": "Property ID to search around (for nearby_properties)"
+                },
+                "target_latitude": {
+                    "type": "number",
+                    "description": "Target latitude (for nearby_properties or neighborhood)"
+                },
+                "target_longitude": {
+                    "type": "number",
+                    "description": "Target longitude (for nearby_properties or neighborhood)"
+                },
+                "radius_miles": {
+                    "type": "number",
+                    "description": "Search or analysis radius in miles (suggest: 0.5-2.0 for nearby, 0.3-0.5 for neighborhood)"
+                },
+                "market_id": {
+                    "type": "string",
+                    "description": "Market ID (for growth_hotspots)"
+                },
+                "property_type": {
+                    "type": "string",
+                    "description": "Filter by property type (e.g., 'VACANT', 'SINGLE FAMILY')"
+                },
+                "min_price": {
+                    "type": "number",
+                    "description": "Minimum market value filter"
+                },
+                "max_price": {
+                    "type": "number",
+                    "description": "Maximum market value filter"
+                },
+                "min_activity_score": {
+                    "type": "number",
+                    "description": "Minimum activity score for hotspots (0-1, suggest: 0.6-0.8)"
+                },
+                "lookback_days": {
+                    "type": "integer",
+                    "description": "Days to analyze for hotspots (suggest: 90-180)"
+                }
+            },
+            "required": ["analysis_type"]
+        }
+    },
+    {
+        "name": "analyze_comparable_sales",
+        "description": """Analyze comparable property sales to estimate market value and validate asking prices.
+
+WHEN TO USE:
+1. User asks "Is this price fair?" or "What's this property worth?"
+2. Validating a deal (check if asking price aligns with market)
+3. Supporting investment recommendation with market validation
+4. Generating CMA-style reports for $200 deep analysis product
+
+CAPABILITIES:
+
+1. FIND COMPARABLE SALES
+   Find similar properties that recently sold:
+   - Same property type (e.g., SINGLE FAMILY, VACANT)
+   - Similar size (±30% lot_size_acres by default)
+   - Nearby location (within radius)
+   - Recent sales (last 6-12 months typical)
+   Returns list of comps with sale prices, dates, distances
+
+2. ESTIMATE MARKET VALUE
+   Calculate estimated market value from comparable sales:
+   - Uses price per acre methodology for land
+   - Averages sale prices for similar properties
+   - Returns confidence score (0-1) based on:
+     * Number of comps (more is better)
+     * Price consistency (less variance is better)
+     * Recency (newer sales weighted higher)
+     * Proximity (closer comps weighted higher)
+
+3. VALIDATE ASKING PRICE
+   Determine if an asking price is fair, overpriced, or underpriced:
+   - Compares asking price to estimated market value
+   - "Fair" if within 5% of market
+   - "Overpriced" if >5% above market
+   - "Underpriced" if >5% below market
+   - Provides recommendation text and percentage differences
+
+4. FULL CMA REPORT
+   Generate complete comparative market analysis:
+   - All comparable sales found
+   - Market value estimate with confidence
+   - Price validation if asking price provided
+   - Complete statistics and methodology
+
+USAGE PATTERNS:
+
+Price Validation:
+- User has asking price → use validate_asking_price
+- User wants to know value → use estimate_market_value
+- Full report needed → use full_cma
+
+Market Context:
+- Combine with analyze_property for complete picture
+- Use after location analysis to understand market dynamics
+- Part of $200 deep analysis reports
+
+RETURNS (varies by analysis_mode):
+- comparable_sales: List of similar properties with sale data
+- market_value_estimate: Estimated value, confidence, methodology
+- price_validation: Assessment, difference from market, recommendation
+- full_report: Complete CMA with all components""",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "subject_property_id": {
+                    "type": "string",
+                    "description": "Property ID to analyze (from search_properties or analyze_property)"
+                },
+                "analysis_mode": {
+                    "type": "string",
+                    "enum": ["find_comps", "estimate_value", "validate_price", "full_cma"],
+                    "description": "Type of analysis: find_comps (just find comps), estimate_value (calculate market value), validate_price (check if asking price fair), full_cma (complete report)"
+                },
+                "asking_price": {
+                    "type": "number",
+                    "description": "Asking/offer price to validate (required for validate_price and full_cma modes)"
+                },
+                "max_distance_miles": {
+                    "type": "number",
+                    "description": "Maximum distance for comparable properties (default: 1.0 mile, can expand to 2-5 if few comps)"
+                },
+                "max_age_days": {
+                    "type": "integer",
+                    "description": "Maximum age of sales to consider (default: 180 days for 6 months, can use 365 for 1 year)"
+                },
+                "min_comps": {
+                    "type": "integer",
+                    "description": "Minimum comparable sales to find (default: 3, standard CMA needs 3-5)"
+                },
+                "max_comps": {
+                    "type": "integer",
+                    "description": "Maximum comparable sales to return (default: 10)"
+                },
+                "size_tolerance": {
+                    "type": "number",
+                    "description": "Size tolerance for comps (default: 0.3 for ±30%, can adjust for unique properties)"
+                }
+            },
+            "required": ["subject_property_id", "analysis_mode"]
         }
     }
 ]
@@ -457,6 +739,8 @@ class AgentTools:
         self.entity_analyzer = EntityAnalyzer(session)
         self.market_analyzer = MarketAnalyzer(session)
         self.property_search_analyzer = PropertySearchAnalyzer(session)
+        self.location_analyzer = LocationAnalyzer(session)
+        self.comparable_sales_analyzer = ComparableSalesAnalyzer(session)
 
         # Enrichment services (initialized lazily)
         self._sunbiz_service = None
@@ -492,6 +776,10 @@ class AgentTools:
             return await self._enrich_property_qpublic(**parameters)
         elif tool_name == "search_ordinances":
             return await self._search_ordinances(**parameters)
+        elif tool_name == "analyze_location":
+            return await self._analyze_location(**parameters)
+        elif tool_name == "analyze_comparable_sales":
+            return await self._analyze_comparable_sales(**parameters)
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
 
@@ -856,6 +1144,146 @@ class AgentTools:
             property_type=property_type,
             limit=limit
         )
+
+    async def _analyze_location(
+        self,
+        analysis_type: str,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Execute LocationAnalyzer methods based on analysis_type"""
+
+        try:
+            if analysis_type == "nearby_properties":
+                # Extract relevant parameters
+                result = await self.location_analyzer.find_nearby_properties(
+                    target_property_id=kwargs.get('target_property_id'),
+                    target_latitude=kwargs.get('target_latitude'),
+                    target_longitude=kwargs.get('target_longitude'),
+                    radius_miles=kwargs.get('radius_miles', 1.0),
+                    market_id=kwargs.get('market_id'),
+                    property_type=kwargs.get('property_type'),
+                    min_price=kwargs.get('min_price'),
+                    max_price=kwargs.get('max_price'),
+                    limit=100
+                )
+                return result
+
+            elif analysis_type == "growth_hotspots":
+                market_id = kwargs.get('market_id')
+                if not market_id:
+                    return {
+                        'error': 'market_id required for growth_hotspots analysis',
+                        'analysis_type': analysis_type
+                    }
+
+                result = await self.location_analyzer.find_growth_hotspots(
+                    market_id=market_id,
+                    min_activity_score=kwargs.get('min_activity_score', 0.7),
+                    lookback_days=kwargs.get('lookback_days', 180)
+                )
+                return result
+
+            elif analysis_type == "neighborhood":
+                latitude = kwargs.get('target_latitude') or kwargs.get('latitude')
+                longitude = kwargs.get('target_longitude') or kwargs.get('longitude')
+
+                if latitude is None or longitude is None:
+                    return {
+                        'error': 'latitude and longitude required for neighborhood analysis',
+                        'analysis_type': analysis_type
+                    }
+
+                result = await self.location_analyzer.analyze_neighborhood(
+                    latitude=latitude,
+                    longitude=longitude,
+                    radius_miles=kwargs.get('radius_miles', 0.5),
+                    market_id=kwargs.get('market_id')
+                )
+                return result
+
+            else:
+                return {
+                    'error': f'Unknown analysis_type: {analysis_type}',
+                    'valid_types': ['nearby_properties', 'growth_hotspots', 'neighborhood']
+                }
+
+        except Exception as e:
+            return {
+                'error': f'Location analysis failed: {str(e)}',
+                'analysis_type': analysis_type
+            }
+
+    async def _analyze_comparable_sales(
+        self,
+        subject_property_id: str,
+        analysis_mode: str,
+        asking_price: float = None,
+        max_distance_miles: float = 1.0,
+        max_age_days: int = 180,
+        min_comps: int = 3,
+        max_comps: int = 10,
+        size_tolerance: float = 0.3,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Analyze comparable sales for market valuation"""
+        try:
+            # Validate required parameters
+            if analysis_mode in ['validate_price', 'full_cma'] and asking_price is None:
+                return {
+                    'error': f'asking_price required for {analysis_mode} mode',
+                    'analysis_mode': analysis_mode
+                }
+
+            # Execute requested analysis
+            if analysis_mode == "find_comps":
+                result = await self.comparable_sales_analyzer.find_comparable_sales(
+                    subject_property_id=subject_property_id,
+                    max_distance_miles=max_distance_miles,
+                    max_age_days=max_age_days,
+                    min_comps=min_comps,
+                    max_comps=max_comps,
+                    size_tolerance=size_tolerance
+                )
+                return result
+
+            elif analysis_mode == "estimate_value":
+                result = await self.comparable_sales_analyzer.estimate_market_value(
+                    subject_property_id=subject_property_id,
+                    max_distance_miles=max_distance_miles,
+                    max_age_days=max_age_days
+                )
+                return result
+
+            elif analysis_mode == "validate_price":
+                result = await self.comparable_sales_analyzer.validate_asking_price(
+                    subject_property_id=subject_property_id,
+                    asking_price=asking_price,
+                    max_distance_miles=max_distance_miles,
+                    max_age_days=max_age_days
+                )
+                return result
+
+            elif analysis_mode == "full_cma":
+                result = await self.comparable_sales_analyzer.analyze_comps(
+                    subject_property_id=subject_property_id,
+                    asking_price=asking_price,
+                    max_distance_miles=max_distance_miles,
+                    max_age_days=max_age_days
+                )
+                return result
+
+            else:
+                return {
+                    'error': f'Unknown analysis_mode: {analysis_mode}',
+                    'valid_modes': ['find_comps', 'estimate_value', 'validate_price', 'full_cma']
+                }
+
+        except Exception as e:
+            return {
+                'error': f'Comparable sales analysis failed: {str(e)}',
+                'analysis_mode': analysis_mode,
+                'subject_property_id': subject_property_id
+            }
 
     def get_tool_definitions(self) -> list:
         """Get tool definitions for Gemini function calling"""

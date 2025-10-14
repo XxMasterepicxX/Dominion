@@ -72,11 +72,11 @@ class RelationshipBuilder:
         """
         relationships = []
 
-        # NOTE: Schema v2 change - entity_relationships is for entity→entity only
+        # NOTE: Schema v2 change - entity_relationships is for entity->entity only
         # Property relationships are tracked via FKs (permit.property_id, permit.contractor_entity_id)
         # For portfolio tracking, use entity_market_properties table
 
-        # Skip entity→property relationships (properties aren't entities)
+        # Skip entity->property relationships (properties aren't entities)
         # The link already exists via permit.property_id and permit.contractor_entity_id
 
         logger.info(f"Permit {permit.permit_number}: property_id={permit.property_id}, contractor={permit.contractor_entity_id}, applicant={permit.applicant_entity_id}")

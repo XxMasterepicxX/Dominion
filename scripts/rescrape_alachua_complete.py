@@ -63,12 +63,12 @@ async def main():
                 results.append(result)
 
                 if result['status'] == 'success':
-                    print(f"✓ {municipality['name']}: {result.get('ordinances_scraped', 0)} ordinances, {result.get('total_size', 0):,} chars")
+                    print(f"[OK] {municipality['name']}: {result.get('ordinances_scraped', 0)} ordinances, {result.get('total_size', 0):,} chars")
                 else:
-                    print(f"✗ {municipality['name']}: {result['status']}")
+                    print(f"[FAIL] {municipality['name']}: {result['status']}")
 
             except Exception as e:
-                print(f"✗ {municipality['name']}: ERROR - {e}")
+                print(f"[ERROR] {municipality['name']}: ERROR - {e}")
                 results.append({
                     "municipality": municipality['name'],
                     "status": "error",

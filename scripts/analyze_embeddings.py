@@ -73,13 +73,13 @@ def analyze_embeddings(filepath: str):
             missing_fields.append(field)
 
     if missing_fields:
-        print(f"   ⚠️  Missing fields: {missing_fields}")
+        print(f"   [WARN] Missing fields: {missing_fields}")
     else:
-        print(f"   ✅ All required fields present")
+        print(f"   [OK] All required fields present")
 
     # Check for metadata field
     has_metadata = 'metadata' in sample
-    print(f"   Metadata field present: {'✅ Yes' if has_metadata else '❌ No'}")
+    print(f"   Metadata field present: {'[OK] Yes' if has_metadata else '[MISSING] No'}")
 
     # 5. CONTENT QUALITY CHECK
     print("\n5. CONTENT QUALITY CHECK:")
@@ -125,7 +125,7 @@ def analyze_embeddings(filepath: str):
 
     print("   New keyword occurrences:")
     for keyword, count in sorted(new_keywords.items(), key=lambda x: x[1], reverse=True):
-        status = "✅" if count > 0 else "❌"
+        status = "[FOUND]" if count > 0 else "[NOT FOUND]"
         print(f"      {status} '{keyword}': {count} chunks")
 
     # 7. FILE SIZE ANALYSIS
@@ -144,14 +144,14 @@ def analyze_embeddings(filepath: str):
         if timestamps:
             unique_timestamps = set(timestamps)
             print(f"   Unique file timestamps: {len(unique_timestamps)}")
-            print(f"   All chunks have timestamps: {'✅ Yes' if len(timestamps) == len(embeddings) else '❌ No'}")
+            print(f"   All chunks have timestamps: {'[OK] Yes' if len(timestamps) == len(embeddings) else '[FAIL] No'}")
     else:
-        print(f"   ❌ No file_modified_timestamp field found")
+        print(f"   [MISSING] No file_modified_timestamp field found")
 
     if 'scraped_date' in sample:
-        print(f"   ✅ scraped_date field present")
+        print(f"   [OK] scraped_date field present")
     else:
-        print(f"   ❌ No scraped_date field found")
+        print(f"   [MISSING] No scraped_date field found")
 
     # 9. VALIDATION SUMMARY
     print("\n9. VALIDATION SUMMARY:")
@@ -170,17 +170,17 @@ def analyze_embeddings(filepath: str):
     total = len(checks)
 
     for check_name, result in checks:
-        status = "✅ PASS" if result else "❌ FAIL"
+        status = "[PASS]" if result else "[FAIL]"
         print(f"   {status}: {check_name}")
 
     print(f"\n   Overall: {passed}/{total} checks passed ({passed/total*100:.1f}%)")
 
     if passed == total:
-        print("\n   🎉 ALL CHECKS PASSED - Embeddings ready for production!")
+        print("\n   ALL CHECKS PASSED - Embeddings ready for production!")
     elif passed >= total * 0.8:
-        print("\n   ⚠️  MOSTLY GOOD - Minor issues, but usable")
+        print("\n   [WARN] MOSTLY GOOD - Minor issues, but usable")
     else:
-        print("\n   ❌ ISSUES FOUND - Review failures before proceeding")
+        print("\n   [FAIL] ISSUES FOUND - Review failures before proceeding")
 
     return {
         'total_chunks': len(embeddings),
