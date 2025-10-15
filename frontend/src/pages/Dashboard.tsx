@@ -1,70 +1,126 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import logo from '../assets/logo.png';
 import { Globe } from '../components/Globe';
+import { connectDashboardUpdates, fetchDashboardState } from '../services/dashboard';
+import type { DashboardState } from '../types/dashboard';
 import './Dashboard.css';
 
-const signalTimeline = [
-  {
-    title: 'Assemblage sweep complete',
-    detail: 'Innovation Square perimeter parcels verified across Gainesville property appraiser and Sunbiz filings.',
-    timestamp: 'Oct 10 - 02:26',
-    status: 'Completed',
-  },
-  {
-    title: 'Permit velocity spike detected',
-    detail: 'Tampa River District commercial permits up 37% week-over-week. Flagged for investor review.',
-    timestamp: 'Oct 09 - 19:04',
-    status: 'Queued',
-  },
-  {
-    title: 'LLC cluster enrichment',
-    detail: 'Jacksonville logistics corridor LLC formations mapped to parcel acquisitions.',
-    timestamp: 'Oct 09 - 11:42',
-    status: 'Research',
-  },
-];
+type PanelKey = 'report' | 'opportunities' | 'activity';
 
-const opportunityQueue = [
-  {
-    entity: 'Infinity Development LLC',
-    market: 'Gainesville, FL',
-    signal: 'Assemblage pattern',
-    confidence: '0.92',
-    lead: '14d lead',
-  },
-  {
-    entity: 'Urban Nexus Capital',
-    market: 'Tampa, FL',
-    signal: 'Permit velocity spike',
-    confidence: '0.88',
-    lead: '21d lead',
-  },
-  {
-    entity: 'Beacon Ridge Partners',
-    market: 'Jacksonville, FL',
-    signal: 'LLC formation cluster',
-    confidence: '0.85',
-    lead: '9d lead',
-  },
-];
-
-const missionBrief = {
-  confidence: '0.92',
-  leadTime: '3-6 weeks',
-  summary:
-    'Dominion agent is tracking Gainesville Innovation Square assemblage activity. Parcel consolidation, overlapping LLC registrations, and council agenda references indicate pre-development motion with high investor interest.',
-  nextSteps: [
-    'Validate parcel acquisition chain completion',
-    'Model entitlement outcomes using council transcripts',
-    'Stage Gainesville investor briefing by Monday 09:00 ET',
-  ],
+const formatRelativeTime = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 0) {
+    return 'just now';
+  }
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
 };
 
-type PanelKey = 'mission' | 'queue' | 'timeline';
+const formatConfidence = (value?: number) => {
+  if (typeof value !== 'number') {
+    return '--';
+  }
+  return `${Math.round(value * 100)}%`;
+};
+
+const formatToolName = (toolName: string) =>
+  toolName.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 
 export const Dashboard = () => {
-  const [activePanel, setActivePanel] = useState<PanelKey>('mission');
+  const [searchParams] = useSearchParams();
+  const [state, setState] = useState<DashboardState | null>(null);
+  const [activePanel, setActivePanel] = useState<PanelKey>('report');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const requestedProjectId = searchParams.get('projectId') ?? undefined;
+  const projectId = state?.project.id ?? requestedProjectId ?? undefined;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    fetchDashboardState({ projectId: requestedProjectId, signal: controller.signal })
+      .then((data) => {
+        setState(data);
+        setError(null);
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          setError('Unable to load project report.');
+        }
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [requestedProjectId]);
+
+  useEffect(() => {
+    if (!projectId) {
+      return;
+    }
+    const disconnect = connectDashboardUpdates({
+      projectId,
+      onUpdate: (message) => {
+        if (message.type === 'update_detected') {
+          setState((prev) => {
+            if (!prev) return prev;
+            const updates = [
+              message.payload.update,
+              ...prev.latestUpdates.filter((item) => item.id !== message.payload.update.id),
+            ];
+            return {
+              ...prev,
+              latestUpdates: updates.slice(0, 10),
+            };
+          });
+        }
+
+        if (message.type === 'state_refresh') {
+          setState(message.payload.state);
+        }
+      },
+    });
+
+    return () => {
+      disconnect?.();
+    };
+  }, [projectId]);
+
+  const markers = useMemo(
+    () =>
+      state?.markets.map((marker) => ({
+        location: marker.location,
+        size: marker.size,
+      })) ?? [],
+    [state],
+  );
+  const globeConfig = useMemo(() => ({ markers }), [markers]);
+
+  if (!state) {
+    return (
+      <div className="dashboard dashboard--ready">
+        <div className="dashboard__loading">
+          <span>{loading ? 'Loading project report...' : error ?? 'No project data available.'}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="dashboard dashboard--ready">
@@ -81,25 +137,39 @@ export const Dashboard = () => {
           </div>
           <div className="dashboard__sidebar-section">
             <div className="dashboard__sidebar-heading">
-              <span>Current mission</span>
-              <span className="dashboard__sidebar-tag">Gainesville, FL</span>
+              <span>Project Report</span>
+              <span className="dashboard__sidebar-tag">{state.project.market}</span>
+            </div>
+            <div className="dashboard__sidebar-meta">
+              <span>{state.project.name}</span>
+              <span>Generated {formatRelativeTime(state.project.generatedAt)}</span>
+              <span>Last updated {formatRelativeTime(state.lastDataCheck)}</span>
+              <span>Confidence {formatConfidence(state.project.confidence)}</span>
+              <span>Opportunities {state.project.opportunities}</span>
+            </div>
+            <div className={`dashboard__live ${state.isLive ? 'dashboard__live--active' : ''}`}>
+              <span className="dashboard__live-dot" />
+              <span>{state.isLive ? 'Live updates enabled' : 'Live updates paused'}</span>
             </div>
             <button type="button" className="dashboard__sidebar-primary">
-              Preview briefing
+              Export PDF
             </button>
           </div>
           <div className="dashboard__sidebar-list">
-            <span className="dashboard__sidebar-label">Latest signals</span>
+            <span className="dashboard__sidebar-label">Latest Updates</span>
             <ul>
-              {signalTimeline.map((item) => (
-                <li key={item.title}>
+              {state.latestUpdates.map((item) => (
+                <li
+                  key={item.id}
+                  className={`dashboard__sidebar-item ${item.status === 'new' ? 'dashboard__sidebar-item--new' : ''}`}
+                >
                   <div>
                     <span className="dashboard__sidebar-item-title">{item.title}</span>
                     <span className="dashboard__sidebar-item-detail">{item.detail}</span>
                   </div>
                   <div className="dashboard__sidebar-item-meta">
-                    <span>{item.timestamp}</span>
-                    <span className="dashboard__sidebar-status">{item.status}</span>
+                    <span>{formatRelativeTime(item.timestamp)}</span>
+                    <span className="dashboard__sidebar-status">{item.updateType.replace('_', ' ')}</span>
                   </div>
                 </li>
               ))}
@@ -109,36 +179,31 @@ export const Dashboard = () => {
 
         <section className="dashboard__globe-stage">
           <div className="dashboard__globe-wrapper">
-            <Globe className="dashboard__globe" />
+            <Globe className="dashboard__globe" config={globeConfig} />
             <div className="dashboard__globe-overlay">
-              <span>Mission density</span>
-              <strong>30 active</strong>
+              <span>{state.trackingDensity.label}</span>
+              <strong>{state.trackingDensity.value}</strong>
             </div>
           </div>
 
           <div className="dashboard__focus-card">
             <header>
-              <span>Gainesville assemblage overview</span>
-              <span className="dashboard__focus-card-tag">High confidence</span>
+              <span>{state.focusCard.header}</span>
+              <span
+                className={`dashboard__focus-card-tag dashboard__focus-card-tag--${state.focusCard.tagType}`}
+              >
+                {state.focusCard.tag}
+              </span>
             </header>
             <div className="dashboard__focus-card-body">
-              <p>
-                Infinity Development LLC is consolidating parcels across Innovation Square with supporting signals from
-                permit filings, LLC registrations, and council agenda references.
-              </p>
+              <p>{state.focusCard.summary}</p>
               <div className="dashboard__focus-grid">
-                <div>
-                  <span className="dashboard__focus-label">Parcels linked</span>
-                  <strong>18</strong>
-                </div>
-                <div>
-                  <span className="dashboard__focus-label">Timeline coverage</span>
-                  <strong>6 weeks</strong>
-                </div>
-                <div>
-                  <span className="dashboard__focus-label">Supporting signals</span>
-                  <strong>Permits / LLC filings / News</strong>
-                </div>
+                {state.focusCard.stats.map((stat) => (
+                  <div key={stat.label}>
+                    <span className="dashboard__focus-label">{stat.label}</span>
+                    <strong>{stat.value}</strong>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -148,73 +213,140 @@ export const Dashboard = () => {
           <div className="dashboard__widgets-tabs">
             <button
               type="button"
-              className={`dashboard__widgets-tab ${activePanel === 'mission' ? 'dashboard__widgets-tab--active' : ''}`}
-              onClick={() => setActivePanel('mission')}
+              className={`dashboard__widgets-tab ${activePanel === 'report' ? 'dashboard__widgets-tab--active' : ''}`}
+              onClick={() => setActivePanel('report')}
             >
-              Mission brief
+              Report
             </button>
             <button
               type="button"
-              className={`dashboard__widgets-tab ${activePanel === 'queue' ? 'dashboard__widgets-tab--active' : ''}`}
-              onClick={() => setActivePanel('queue')}
+              className={`dashboard__widgets-tab ${
+                activePanel === 'opportunities' ? 'dashboard__widgets-tab--active' : ''
+              }`}
+              onClick={() => setActivePanel('opportunities')}
             >
-              Opportunity queue
+              Opportunities
             </button>
             <button
               type="button"
-              className={`dashboard__widgets-tab ${activePanel === 'timeline' ? 'dashboard__widgets-tab--active' : ''}`}
-              onClick={() => setActivePanel('timeline')}
+              className={`dashboard__widgets-tab ${activePanel === 'activity' ? 'dashboard__widgets-tab--active' : ''}`}
+              onClick={() => setActivePanel('activity')}
             >
-              Signal timeline
+              Activity
             </button>
           </div>
 
           <article className="dashboard__widget dashboard__widget--deck">
-            {activePanel === 'mission' && (
+            {activePanel === 'report' && (
               <>
                 <header className="dashboard__widget-header">
-                  <span>Mission brief</span>
-                  <span className="dashboard__widget-tag">Dominion agent</span>
+                  <span>Report</span>
+                  <span className="dashboard__widget-tag">Dominion Intelligence</span>
                 </header>
-                <div className="dashboard__widget-stage">
-                  <span>Confidence</span>
-                  <strong>{missionBrief.confidence}</strong>
+                <div className="dashboard__report-meta">
+                  <div>
+                    <span>Confidence</span>
+                    <strong>{`${state.reportContent.confidenceLabel} (${formatConfidence(
+                      state.reportContent.confidence,
+                    )})`}</strong>
+                  </div>
+                  <div>
+                    <span>Coverage</span>
+                    <strong>{state.reportContent.dataCoverage}</strong>
+                  </div>
+                  <div>
+                    <span>Analysis</span>
+                    <strong>{state.reportContent.analysisType}</strong>
+                  </div>
                 </div>
-                <div className="dashboard__widget-stage">
-                  <span>Lead time</span>
-                  <strong>{missionBrief.leadTime}</strong>
+                <p className="dashboard__report-summary">{state.reportContent.summary}</p>
+                {state.reportContent.marketContext && (
+                  <p className="dashboard__report-market">{state.reportContent.marketContext}</p>
+                )}
+
+                <div className="dashboard__report-sections">
+                  {state.reportContent.sections.map((section) => (
+                    <section key={section.title} className="dashboard__report-section">
+                      <header>
+                        <h3>{section.title}</h3>
+                      </header>
+                      <p>{section.content}</p>
+                      {section.metrics && (
+                        <ul className="dashboard__report-metrics">
+                          {section.metrics.map((metric) => (
+                            <li
+                              key={`${section.title}-${metric.label}`}
+                              className={metric.highlight ? 'dashboard__report-metric--highlight' : ''}
+                            >
+                              <span>{metric.label}</span>
+                              <strong>{metric.value}</strong>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </section>
+                  ))}
                 </div>
-                <p className="dashboard__widget-summary">{missionBrief.summary}</p>
-                <div className="dashboard__widget-next">
+
+                <div className="dashboard__report-next">
                   <span>Next actions</span>
                   <ul>
-                    {missionBrief.nextSteps.map((step) => (
+                    {state.reportContent.nextActions.map((step) => (
                       <li key={step}>{step}</li>
                     ))}
                   </ul>
                 </div>
+
+                {state.reportContent.sources && (
+                  <div className="dashboard__report-sources">
+                    <div>
+                      <span>Tools</span>
+                      <strong>{state.reportContent.sources.tools.join(' | ')}</strong>
+                    </div>
+                    <div>
+                      <span>Data</span>
+                      <strong>{state.reportContent.sources.databases.join(' | ')}</strong>
+                    </div>
+                    <div>
+                      <span>Coverage</span>
+                      <strong>{state.reportContent.sources.coverage}</strong>
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
-            {activePanel === 'queue' && (
+            {activePanel === 'opportunities' && (
               <>
                 <header className="dashboard__widget-header">
                   <span>Opportunity queue</span>
                   <span className="dashboard__widget-tag">Auto-ranked</span>
                 </header>
                 <ul className="dashboard__queue">
-                  {opportunityQueue.map((row) => (
-                    <li key={row.entity}>
+                  {state.opportunityQueue.map((row) => (
+                    <li key={row.id}>
                       <div className="dashboard__queue-entity">
-                        <span className="dashboard__queue-name">{row.entity}</span>
+                        <span className="dashboard__queue-name">{row.entity ?? row.property ?? row.market}</span>
                         <span className="dashboard__queue-market">{row.market}</span>
                       </div>
                       <div className="dashboard__queue-meta">
                         <span>{row.signal}</span>
+                        <span>Lead {row.leadTime}</span>
                         <span className="dashboard__queue-confidence">
-                          Confidence <strong>{row.confidence}</strong>
+                          Confidence{' '}
+                          <strong>{`${row.confidenceLabel} (${formatConfidence(row.confidence)})`}</strong>
                         </span>
-                        <span>{row.lead}</span>
+                      </div>
+                      <div className="dashboard__queue-meta">
+                        <span>Action: {row.action}</span>
+                        {row.estimatedReturn && <span>Return {row.estimatedReturn}</span>}
+                      </div>
+                      {row.risks && row.risks.length > 0 && (
+                        <div className="dashboard__queue-risks">Risks: {row.risks.join(' | ')}</div>
+                      )}
+                      <div className="dashboard__queue-status">
+                        <span className={`dashboard__queue-status-dot dashboard__queue-status-dot--${row.status}`} />
+                        <span>{row.status.replace('_', ' ')}</span>
                       </div>
                     </li>
                   ))}
@@ -222,21 +354,25 @@ export const Dashboard = () => {
               </>
             )}
 
-            {activePanel === 'timeline' && (
+            {activePanel === 'activity' && (
               <>
                 <header className="dashboard__widget-header">
-                  <span>Signal timeline</span>
-                  <span className="dashboard__widget-tag dashboard__widget-tag--accent">Live feed</span>
+                  <span>Activity log</span>
+                  <span className="dashboard__widget-tag dashboard__widget-tag--accent">Tool executions</span>
                 </header>
                 <ul className="dashboard__timeline">
-                  {signalTimeline.map((item) => (
-                    <li key={`${item.title}-timeline`}>
+                  {state.activityLog.map((item) => (
+                    <li key={item.id}>
                       <div className="dashboard__timeline-header">
-                        <span>{item.title}</span>
-                        <span>{item.timestamp}</span>
+                        <span>{formatToolName(item.toolName)}</span>
+                        <span>{formatRelativeTime(item.timestamp)}</span>
                       </div>
-                      <p>{item.detail}</p>
-                      <span className="dashboard__timeline-status">{item.status}</span>
+                      <p>{item.description}</p>
+                      <span className="dashboard__timeline-status">
+                        {item.status === 'complete' ? 'Complete' : item.status}
+                        {item.duration ? ` | ${item.duration}` : ''}
+                      </span>
+                      <p className="dashboard__timeline-result">{item.result}</p>
                     </li>
                   ))}
                 </ul>
