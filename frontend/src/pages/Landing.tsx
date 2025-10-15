@@ -63,8 +63,8 @@ export const Landing = () => {
               your team can seize opportunities weeks ahead of the market.
             </p>
             <div className="landing__cta">
-              <Link className="landing__cta-primary" to="/dashboard">
-                Launch dashboard
+              <Link className="landing__cta-primary" to="/projects">
+                View projects
               </Link>
               <a className="landing__cta-secondary" href="#capabilities">
                 Explore capabilities
@@ -170,8 +170,8 @@ export const Landing = () => {
               cohesive control surface.
             </p>
           </div>
-          <Link className="landing__cta-primary landing__cta-primary--large" to="/dashboard">
-            Enter dashboard
+          <Link className="landing__cta-primary landing__cta-primary--large" to="/projects">
+            Select a project
           </Link>
         </div>
       </section>

@@ -150,3 +150,56 @@ export interface DashboardState {
   isLive: boolean;
   lastDataCheck: string;
 }
+
+export type ProjectStatus = 'draft' | 'generating' | 'complete' | 'live';
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  type: ProjectType;
+  market: string;
+  marketCode: string;
+  status: ProjectStatus;
+  progress: number;
+  createdAt: string;
+  lastUpdated: string;
+  description: string;
+  confidence?: number;
+  opportunities?: number;
+}
+
+export interface ProjectAnalysisScope {
+  portfolio: boolean;
+  patterns: boolean;
+  geography: boolean;
+  opportunities: boolean;
+  market: boolean;
+  zoning?: boolean;
+  comparables?: boolean;
+}
+
+export interface ProjectSetupCriteria {
+  propertyType?: string;
+  maxPrice?: number;
+  minPrice?: number;
+  minLotSize?: number;
+  maxLotSize?: number;
+  area?: string;
+  ownerType?: string;
+}
+
+export interface ProjectSetup {
+  name: string;
+  type: ProjectType;
+  market: string;
+  marketCode?: string;
+  entityName?: string;
+  propertyId?: string;
+  parcelId?: string;
+  askingPrice?: number;
+  criteria?: ProjectSetupCriteria;
+  analysisScope: ProjectAnalysisScope;
+  budget?: number;
+  preferredPropertyType?: string;
+  strategy?: string;
+}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import logo from '../assets/logo.png';
 import { Globe } from '../components/Globe';
 import { connectDashboardUpdates, fetchDashboardState } from '../services/dashboard';
@@ -42,17 +42,27 @@ const formatToolName = (toolName: string) =>
 
 export const Dashboard = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [state, setState] = useState<DashboardState | null>(null);
   const [activePanel, setActivePanel] = useState<PanelKey>('report');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const requestedProjectId = searchParams.get('projectId') ?? undefined;
   const projectId = state?.project.id ?? requestedProjectId ?? undefined;
 
   useEffect(() => {
+    if (!requestedProjectId) {
+      setState(null);
+      setError(null);
+      setLoading(false);
+      navigate('/projects', { replace: true });
+      return;
+    }
+
     const controller = new AbortController();
     setLoading(true);
+    setState(null);
     fetchDashboardState({ projectId: requestedProjectId, signal: controller.signal })
       .then((data) => {
         setState(data);
@@ -68,7 +78,7 @@ export const Dashboard = () => {
       });
 
     return () => controller.abort();
-  }, [requestedProjectId]);
+  }, [navigate, requestedProjectId]);
 
   useEffect(() => {
     if (!projectId) {

@@ -6,7 +6,7 @@ const NAV_ITEMS = [
   { label: 'Overview', to: '/' },
   { label: 'Capabilities', to: '/#capabilities' },
   { label: 'Signals', to: '/#signals' },
-  { label: 'Dashboard', to: '/dashboard' },
+  { label: 'Projects', to: '/projects' },
 ];
 
 export const Navigation = () => {
@@ -46,8 +46,8 @@ export const Navigation = () => {
           })}
         </nav>
         <div className="nav__actions">
-          <Link className="nav__cta" to="/dashboard">
-            Launch Command Center
+          <Link className="nav__cta" to="/projects/new">
+            New project
           </Link>
         </div>
       </div>
