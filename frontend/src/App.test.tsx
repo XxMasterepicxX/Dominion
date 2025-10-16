@@ -1,7 +1,12 @@
 import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 import App from './App';
 
-test('renders landing hero headline', () => {
-  render(<App />);
-  expect(screen.getByText(/Anticipate real estate moves before they materialise/i)).toBeInTheDocument();
+describe('App', () => {
+  it('renders landing hero headline', () => {
+    render(<App />);
+    expect(
+      screen.getByText(/Anticipate real estate moves before they materialise/i)
+    ).toBeInTheDocument();
+  });
 });

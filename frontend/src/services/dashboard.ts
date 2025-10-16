@@ -3,7 +3,9 @@ import { mockDashboardState } from '../stubs/mockDashboardState';
 import { mockProjects } from '../stubs/mockProjects';
 
 const DEFAULT_PROJECT_ID = 'proj-123';
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL?.replace(/\/$/, '') ?? '';
+// Vite exposes env vars on import.meta.env in the browser; fall back to process.env for node environments
+const getEnv = (key: string) => (typeof (import.meta as any) !== 'undefined' ? (import.meta as any).env?.[key] : (process as any)?.env?.[key]);
+const API_BASE_URL = (getEnv('REACT_APP_API_BASE_URL') as string | undefined)?.replace(/\/$/, '') ?? '';
 
 type FetchDashboardStateOptions = {
   projectId?: string;
@@ -51,7 +53,7 @@ type ConnectLiveUpdatesOptions = {
   onUpdate: (message: DashboardUpdateMessage) => void;
 };
 
-const WS_BASE_URL = process.env.REACT_APP_WS_BASE_URL?.replace(/\/$/, '') ?? '';
+const WS_BASE_URL = (getEnv('REACT_APP_WS_BASE_URL') as string | undefined)?.replace(/\/$/, '') ?? '';
 
 export function connectDashboardUpdates({ projectId = DEFAULT_PROJECT_ID, onUpdate }: ConnectLiveUpdatesOptions) {
   if (!WS_BASE_URL) {
