@@ -1,0 +1,19 @@
+# Custom PostgreSQL image with both pgvector and PostGIS
+# Fixes the missing PostGIS library issue in production
+
+FROM pgvector/pgvector:pg16
+
+# Install PostGIS extension
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        postgresql-16-postgis-3 \
+        postgis && \
+    rm -rf /var/lib/apt/lists/*
+
+# Verify PostGIS libraries are installed
+RUN ls -la /usr/lib/postgresql/16/lib/ | grep postgis || \
+    (echo "ERROR: PostGIS libraries not found!" && exit 1)
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
+    CMD pg_isready -U postgres -d dominion

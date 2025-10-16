@@ -2,7 +2,10 @@ version: '3.8'
 
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    build:
+      context: ./infrastructure/docker
+      dockerfile: Dockerfile.postgres
+    image: dominion-postgres:latest
     container_name: dominion_postgres
     environment:
       POSTGRES_DB: dominion
