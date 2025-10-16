@@ -8,7 +8,7 @@ Research shows limiting to 8-10 tools max for best performance. We have 10.
 from typing import Dict, Any, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.intelligence.analyzers import (
+from intelligence.analyzers import (
     PropertyAnalyzer,
     EntityAnalyzer,
     MarketAnalyzer,
@@ -16,9 +16,9 @@ from src.intelligence.analyzers import (
     LocationAnalyzer,
     ComparableSalesAnalyzer
 )
-from src.services.sunbiz_enrichment import SunbizEnrichmentService
-from src.services.qpublic_enrichment import QPublicEnrichmentService
-from src.services.ordinance_rag import get_ordinance_rag
+from services.sunbiz_enrichment import SunbizEnrichmentService
+from services.qpublic_enrichment import QPublicEnrichmentService
+from services.ordinance_rag import get_ordinance_rag
 
 
 # Tool definitions for Gemini function calling

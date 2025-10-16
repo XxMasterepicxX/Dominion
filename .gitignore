@@ -116,6 +116,22 @@ temp/
 docs/
 ./docs
 
+# CDK Infrastructure
+infrastructure/cdk.out/
+infrastructure/.cdk.staging/
+infrastructure/cdk.context.json
+infrastructure/**/__pycache__/
+infrastructure/**/*.pyc
+infrastructure/**/*.egg-info/
+
+# AgentCore
+infrastructure/agentcore_agent/.bedrock_agentcore.yaml
+infrastructure/agentcore_agent/__pycache__/
+
+# Lambda layers
+infrastructure/lambda/**/package/
+infrastructure/lambda/**/*.zip
+
 # Allow tracking helpers in frontend/src/lib
 !frontend/src/lib/
 !frontend/src/lib/cn.ts

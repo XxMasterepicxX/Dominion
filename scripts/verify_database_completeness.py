@@ -628,7 +628,7 @@ class DatabaseVerifier:
                     print(f"  {source:25s}: {data['total']:,} records")
 
         # 3-month backfill status
-        print(f"\n📅 3-MONTH BACKFILL STATUS:")
+        print(f"\n 3-MONTH BACKFILL STATUS:")
         backfill_complete = True
         for source, data in self.results.items():
             if isinstance(data, dict) and 'last_3_months' in data:

@@ -2,7 +2,7 @@
 Daily Scraper Runner - TODAY ONLY MODE
 
 This script is designed to run daily and only fetch today's new data.
-Run backfill_3_months.py FIRST to populate historical data.
+Run run_comprehensive_scrape.py FIRST to populate historical data.
 
 Recommended: Run this via cron/Task Scheduler at 11 PM daily.
 """

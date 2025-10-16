@@ -1,0 +1,17 @@
+# AgentCore Agent Dependencies
+
+# Strands Agents framework
+strands-agents==1.12.0
+
+# Bedrock AgentCore SDK (provides HTTP server wrapper)
+bedrock-agentcore
+
+# AWS SDK
+boto3>=1.34.144
+botocore>=1.34.144
+
+# Structured logging
+structlog==24.4.0
+
+# JSON/data handling
+python-dateutil==2.9.0

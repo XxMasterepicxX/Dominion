@@ -31,9 +31,9 @@ try:
 except ImportError:
     GENAI_AVAILABLE = False
 
-from src.agent.tools import AgentTools, TOOL_DEFINITIONS
-from src.agent.prompts import SYSTEM_PROMPT
-from src.config import CurrentMarket
+from agent.tools import AgentTools, TOOL_DEFINITIONS
+from agent.prompts import SYSTEM_PROMPT
+from config import CurrentMarket
 
 logger = structlog.get_logger(__name__)
 

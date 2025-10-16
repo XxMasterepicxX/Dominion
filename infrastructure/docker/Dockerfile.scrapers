@@ -1,0 +1,49 @@
+# Dominion Scraper Container
+# Runs scheduled data scraping tasks (permits, sales, entity enrichment)
+
+FROM public.ecr.aws/lambda/python:3.12-arm64
+
+# Install system dependencies for Patchright (browser automation)
+RUN dnf install -y \
+    libX11 \
+    libXcomposite \
+    libXdamage \
+    libXext \
+    libXfixes \
+    libXrandr \
+    libgbm \
+    libnss3 \
+    libatk-1.0 \
+    libatk-bridge-2.0 \
+    libcups \
+    libdrm \
+    libxkbcommon \
+    libxcb \
+    alsa-lib \
+    at-spi2-atk \
+    at-spi2-core \
+    && dnf clean all
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements
+COPY src/requirements.txt ./requirements.txt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Patchright browsers
+RUN patchright install chromium
+
+# Copy application code
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+
+# Set Python path
+ENV PYTHONPATH=/app
+
+# Entry point script
+COPY infrastructure/docker/scraper_entrypoint.py ./scraper_entrypoint.py
+
+CMD ["python", "scraper_entrypoint.py"]

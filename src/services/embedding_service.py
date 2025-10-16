@@ -17,7 +17,7 @@ import hashlib
 from typing import List, Optional, Dict
 from sentence_transformers import SentenceTransformer
 from sqlalchemy.orm import Session
-from src.database.models import EmbeddingsCache
+from database.models import EmbeddingsCache
 import numpy as np
 from tqdm import tqdm
 

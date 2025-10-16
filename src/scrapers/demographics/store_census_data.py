@@ -12,9 +12,9 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from src.config import load_market_config
-from src.database.connection import db_manager
-from src.scrapers.demographics.census_demographics import CensusScraper
+from config import load_market_config
+from database.connection import db_manager
+from scrapers.demographics.census_demographics import CensusScraper
 from sqlalchemy import text
 import structlog
 

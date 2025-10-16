@@ -1,7 +1,14 @@
 """
-Run ALL scrapers for Gainesville, FL - FIXED VERSION
+Comprehensive Scraper - Pre-AWS Migration
 
-All scrapers properly integrated with correct method signatures
+Runs ALL scrapers with backfill to ensure fresh, complete data:
+- Backfills last 14 days (covers 1-2 weeks gap)
+- Full refresh of all data sources
+- Automatic deduplication (via DataIngestionService)
+- Progress tracking
+- Error handling
+
+ONE COMMAND: python scripts/run_comprehensive_scrape.py
 """
 import asyncio
 import sys
@@ -16,11 +23,29 @@ from src.services.data_ingestion import DataIngestionService
 from src.database.connection import db_manager
 
 
-async def run_city_permits(market_config, days_back=30):
-    """Run city permits scraper"""
+def print_header(title):
+    """Print section header"""
     print("\n" + "=" * 80)
-    print("1. CITY PERMITS (CitizenServe)")
+    print(f" {title}")
     print("=" * 80)
+
+
+def print_progress(current, total, prefix="Progress"):
+    """Print progress bar"""
+    if total == 0:
+        return
+    percent = (current / total) * 100
+    bar_length = 50
+    filled = int(bar_length * current / total)
+    bar = '█' * filled + '░' * (bar_length - filled)
+    print(f"\r{prefix}: |{bar}| {current}/{total} ({percent:.1f}%)", end='', flush=True)
+    if current == total:
+        print()  # New line when complete
+
+
+async def scrape_city_permits_backfill(market_config, days_back=14):
+    """Scrape city permits with backfill"""
+    print_header("1. CITY PERMITS (14-day backfill)")
 
     try:
         from src.scrapers.permits.city_permits import CityPermitsScraper
@@ -28,12 +53,14 @@ async def run_city_permits(market_config, days_back=30):
         scraper = CityPermitsScraper(market_config, headless=True)
         ingestion_service = DataIngestionService()
 
+        print(f"Fetching last {days_back} days of permits...")
         permits = await scraper.fetch_recent_permits(days_back=days_back)
 
         if not permits:
-            return {'total': 0, 'ingested': 0}
+            print("[OK] No permits found")
+            return {'total': 0, 'ingested': 0, 'duplicates': 0}
 
-        print(f"Found {len(permits)} permits\n")
+        print(f"Found {len(permits)} permits")
 
         async with db_manager.get_session() as db_session:
             ingested = 0
@@ -57,30 +84,27 @@ async def run_city_permits(market_config, days_back=30):
 
                 except Exception as e:
                     errors += 1
-                    if errors <= 5:  # Only print first 5 errors
-                        print(f"  Error on permit {i}: {str(e)[:100]}")
+                    if errors <= 3:
+                        print(f"\nError on permit {i}: {str(e)[:100]}")
                     await db_session.rollback()
 
-                if i % 100 == 0:
-                    print(f"  Progress: {i}/{len(permits)}, Errors: {errors}")
+                if i % 50 == 0:
+                    print_progress(i, len(permits), "City Permits")
 
+            print_progress(len(permits), len(permits), "City Permits")
             await db_session.commit()
-            if errors > 0:
-                print(f"  Total errors: {errors}")
 
-        print(f"[OK] City Permits: {ingested} ingested, {duplicates} duplicates")
-        return {'total': len(permits), 'ingested': ingested, 'duplicates': duplicates}
+        print(f"[OK] Ingested: {ingested}, Duplicates: {duplicates}, Errors: {errors}")
+        return {'total': len(permits), 'ingested': ingested, 'duplicates': duplicates, 'errors': errors}
 
     except Exception as e:
-        print(f"[ERROR] {str(e)[:200]}")
+        print(f"[ERROR] {str(e)}")
         return {'total': 0, 'ingested': 0, 'error': str(e)}
 
 
-async def run_county_permits(market_config, days_back=30):
-    """Run county permits scraper"""
-    print("\n" + "=" * 80)
-    print("2. COUNTY PERMITS (CitizenServe)")
-    print("=" * 80)
+async def scrape_county_permits_backfill(market_config, days_back=14):
+    """Scrape county permits with backfill"""
+    print_header("2. COUNTY PERMITS (14-day backfill)")
 
     try:
         from src.scrapers.permits.county_permits import CountyPermitsScraper
@@ -88,26 +112,26 @@ async def run_county_permits(market_config, days_back=30):
         scraper = CountyPermitsScraper(market_config, headless=True)
         ingestion_service = DataIngestionService()
 
-        # This returns List[Dict] not List[PermitRecord]
+        print(f"Fetching last {days_back} days of permits...")
         permits = await scraper.fetch_recent_permits(days_back=days_back)
 
         if not permits:
-            return {'total': 0, 'ingested': 0}
+            print("[OK] No permits found")
+            return {'total': 0, 'ingested': 0, 'duplicates': 0}
 
-        print(f"Found {len(permits)} permits\n")
+        print(f"Found {len(permits)} permits")
 
         async with db_manager.get_session() as db_session:
             ingested = 0
             duplicates = 0
 
             for i, permit_dict in enumerate(permits, 1):
-                # Convert pandas Timestamp and NaN values for JSON serialization
                 import math
                 cleaned_permit = {}
                 for key, value in permit_dict.items():
-                    if hasattr(value, 'isoformat'):  # datetime/Timestamp objects
+                    if hasattr(value, 'isoformat'):
                         cleaned_permit[key] = value.isoformat() if value else None
-                    elif isinstance(value, float) and math.isnan(value):  # NaN values
+                    elif isinstance(value, float) and math.isnan(value):
                         cleaned_permit[key] = None
                     else:
                         cleaned_permit[key] = value
@@ -125,24 +149,23 @@ async def run_county_permits(market_config, days_back=30):
                 else:
                     ingested += 1
 
-                if i % 100 == 0:
-                    print(f"  Progress: {i}/{len(permits)}")
+                if i % 50 == 0:
+                    print_progress(i, len(permits), "County Permits")
 
+            print_progress(len(permits), len(permits), "County Permits")
             await db_session.commit()
 
-        print(f"[OK] County Permits: {ingested} ingested, {duplicates} duplicates")
+        print(f"[OK] Ingested: {ingested}, Duplicates: {duplicates}")
         return {'total': len(permits), 'ingested': ingested, 'duplicates': duplicates}
 
     except Exception as e:
-        print(f"[ERROR] {str(e)[:200]}")
+        print(f"[ERROR] {str(e)}")
         return {'total': 0, 'ingested': 0, 'error': str(e)}
 
 
-async def run_crime_scraper(market_config, days_back=30):
-    """Run crime data scraper (SYNC)"""
-    print("\n" + "=" * 80)
-    print("3. CRIME DATA (Socrata)")
-    print("=" * 80)
+async def scrape_crime_backfill(market_config, days_back=14):
+    """Scrape crime data with backfill"""
+    print_header("3. CRIME DATA (14-day backfill)")
 
     try:
         from src.scrapers.data_sources.crime_data_socrata import CrimeDataScraper
@@ -150,13 +173,14 @@ async def run_crime_scraper(market_config, days_back=30):
         scraper = CrimeDataScraper(market_config)
         ingestion_service = DataIngestionService()
 
-        # SYNC method!
+        print(f"Fetching last {days_back} days of crime reports...")
         crime_reports = scraper.fetch_recent_crimes(days_back=days_back)
 
         if not crime_reports:
-            return {'total': 0, 'ingested': 0}
+            print("[OK] No crime reports found")
+            return {'total': 0, 'ingested': 0, 'duplicates': 0}
 
-        print(f"Found {len(crime_reports)} crime reports\n")
+        print(f"Found {len(crime_reports)} crime reports")
 
         async with db_manager.get_session() as db_session:
             ingested = 0
@@ -176,24 +200,23 @@ async def run_crime_scraper(market_config, days_back=30):
                 else:
                     ingested += 1
 
-                if i % 100 == 0:
-                    print(f"  Progress: {i}/{len(crime_reports)}")
+                if i % 50 == 0:
+                    print_progress(i, len(crime_reports), "Crime Data")
 
+            print_progress(len(crime_reports), len(crime_reports), "Crime Data")
             await db_session.commit()
 
-        print(f"[OK] Crime Data: {ingested} ingested, {duplicates} duplicates")
+        print(f"[OK] Ingested: {ingested}, Duplicates: {duplicates}")
         return {'total': len(crime_reports), 'ingested': ingested, 'duplicates': duplicates}
 
     except Exception as e:
-        print(f"[ERROR] {str(e)[:200]}")
+        print(f"[ERROR] {str(e)}")
         return {'total': 0, 'ingested': 0, 'error': str(e)}
 
 
-async def run_news_scraper(market_config):
-    """Run news RSS scraper (SYNC)"""
-    print("\n" + "=" * 80)
-    print("4. NEWS RSS FEEDS")
-    print("=" * 80)
+async def scrape_news(market_config):
+    """Scrape news RSS feeds"""
+    print_header("4. NEWS RSS FEEDS")
 
     try:
         from src.scrapers.business.news_rss_extractor import NewsRSSScraper
@@ -201,13 +224,14 @@ async def run_news_scraper(market_config):
         scraper = NewsRSSScraper(market_config)
         ingestion_service = DataIngestionService()
 
-        # SYNC method!
+        print("Fetching latest news articles...")
         articles = scraper.fetch_recent_news()
 
         if not articles:
-            return {'total': 0, 'ingested': 0}
+            print("[OK] No articles found")
+            return {'total': 0, 'ingested': 0, 'duplicates': 0}
 
-        print(f"Found {len(articles)} articles\n")
+        print(f"Found {len(articles)} articles")
 
         async with db_manager.get_session() as db_session:
             ingested = 0
@@ -228,23 +252,22 @@ async def run_news_scraper(market_config):
                     ingested += 1
 
                 if i % 20 == 0:
-                    print(f"  Progress: {i}/{len(articles)}")
+                    print_progress(i, len(articles), "News Articles")
 
+            print_progress(len(articles), len(articles), "News Articles")
             await db_session.commit()
 
-        print(f"[OK] News: {ingested} ingested, {duplicates} duplicates")
+        print(f"[OK] Ingested: {ingested}, Duplicates: {duplicates}")
         return {'total': len(articles), 'ingested': ingested, 'duplicates': duplicates}
 
     except Exception as e:
-        print(f"[ERROR] {str(e)[:200]}")
+        print(f"[ERROR] {str(e)}")
         return {'total': 0, 'ingested': 0, 'error': str(e)}
 
 
-async def run_council_scraper(market_config, months_back=3):
-    """Run city council scraper (SYNC)"""
-    print("\n" + "=" * 80)
-    print("5. CITY COUNCIL MEETINGS (eScribe)")
-    print("=" * 80)
+async def scrape_council(market_config):
+    """Scrape city council meetings"""
+    print_header("5. CITY COUNCIL MEETINGS")
 
     try:
         from src.scrapers.government.city_council_scraper import CouncilScraper
@@ -252,13 +275,14 @@ async def run_council_scraper(market_config, months_back=3):
         scraper = CouncilScraper(market_config)
         ingestion_service = DataIngestionService()
 
-        # SYNC method! Uses months_back not days_back
-        meetings = scraper.fetch_recent_meetings(months_back=months_back)
+        print("Fetching last 3 months of council meetings...")
+        meetings = scraper.fetch_recent_meetings(months_back=3)
 
         if not meetings:
-            return {'total': 0, 'ingested': 0}
+            print("[OK] No meetings found")
+            return {'total': 0, 'ingested': 0, 'duplicates': 0}
 
-        print(f"Found {len(meetings)} meetings\n")
+        print(f"Found {len(meetings)} meetings")
 
         async with db_manager.get_session() as db_session:
             ingested = 0
@@ -280,19 +304,17 @@ async def run_council_scraper(market_config, months_back=3):
 
             await db_session.commit()
 
-        print(f"[OK] Council Meetings: {ingested} ingested, {duplicates} duplicates")
+        print(f"[OK] Ingested: {ingested}, Duplicates: {duplicates}")
         return {'total': len(meetings), 'ingested': ingested, 'duplicates': duplicates}
 
     except Exception as e:
-        print(f"[ERROR] {str(e)[:200]}")
+        print(f"[ERROR] {str(e)}")
         return {'total': 0, 'ingested': 0, 'error': str(e)}
 
 
-async def run_census_scraper(market_config, market_id='gainesville_fl'):
-    """Run census demographics scraper"""
-    print("\n" + "=" * 80)
-    print("6. CENSUS DEMOGRAPHICS (US Census Bureau ACS5)")
-    print("=" * 80)
+async def scrape_census(market_config):
+    """Scrape census demographics"""
+    print_header("6. CENSUS DEMOGRAPHICS")
 
     try:
         from src.scrapers.demographics.census_demographics import CensusScraper
@@ -301,54 +323,40 @@ async def run_census_scraper(market_config, market_id='gainesville_fl'):
 
         scraper = CensusScraper(market_config)
 
-        # Fetch census data
+        print("Fetching census data...")
         census_data = scraper.fetch_county_data()
 
         if not census_data:
             print("[ERROR] Failed to fetch census data")
             return {'total': 0, 'stored': 0, 'error': 'Fetch failed'}
 
-        # Extract variables
         population = int(census_data.get('B01003_001E', 0))
         median_income = int(census_data.get('B19013_001E', 0))
         median_home_value = int(census_data.get('B25077_001E', 0))
 
-        print(f"Found census data:")
-        print(f"  Population: {population:,}")
-        print(f"  Median Income: ${median_income:,}")
-        print(f"  Median Home Value: ${median_home_value:,}\n")
+        print(f"Population: {population:,}")
+        print(f"Median Income: ${median_income:,}")
+        print(f"Median Home Value: ${median_home_value:,}")
 
-        # Get market UUID and store in database
         async with db_manager.get_session() as session:
             result = await session.execute(
                 text("SELECT id FROM markets WHERE market_code = :code"),
-                {'code': market_id}
+                {'code': 'gainesville_fl'}
             )
             row = result.fetchone()
             if not row:
-                print(f"[ERROR] Market not found: {market_id}")
+                print("[ERROR] Market not found")
                 return {'total': 0, 'stored': 0, 'error': 'Market not found'}
 
             market_uuid = str(row[0])
 
-            # Store in database (upsert)
             query = text("""
                 INSERT INTO market_demographics (
-                    market_id,
-                    total_population,
-                    median_household_income,
-                    median_home_value,
-                    census_variables,
-                    data_year,
-                    census_dataset
+                    market_id, total_population, median_household_income,
+                    median_home_value, census_variables, data_year, census_dataset
                 ) VALUES (
-                    :market_id,
-                    :population,
-                    :income,
-                    :home_value,
-                    :census_vars,
-                    2022,
-                    'acs5'
+                    :market_id, :population, :income, :home_value,
+                    :census_vars, 2022, 'acs5'
                 )
                 ON CONFLICT (market_id, data_year)
                 DO UPDATE SET
@@ -370,23 +378,17 @@ async def run_census_scraper(market_config, market_id='gainesville_fl'):
 
             await session.commit()
 
-            demo_id = result.fetchone()[0]
-
-        print(f"[OK] Census: Stored demographics (id: {demo_id})")
-        return {'total': 1, 'stored': 1, 'demographics_id': str(demo_id)}
+        print("[OK] Census data stored")
+        return {'total': 1, 'stored': 1}
 
     except Exception as e:
-        print(f"[ERROR] {str(e)[:200]}")
-        import traceback
-        traceback.print_exc()
+        print(f"[ERROR] {str(e)}")
         return {'total': 0, 'stored': 0, 'error': str(e)}
 
 
-async def run_sunbiz_scraper(market_config, limit=None):
-    """Run Sunbiz scraper (SYNC)"""
-    print("\n" + "=" * 80)
-    print("7. SUNBIZ (Florida Business Entities)")
-    print("=" * 80)
+async def scrape_sunbiz(market_config):
+    """Scrape Sunbiz business entities"""
+    print_header("7. SUNBIZ (Florida Business Entities)")
 
     try:
         from src.scrapers.data_sources.sunbiz import SunbizScraper
@@ -394,27 +396,23 @@ async def run_sunbiz_scraper(market_config, limit=None):
         scraper = SunbizScraper()
         ingestion_service = DataIngestionService()
 
-        # SYNC method! scrape_all() returns Dict with 'formations' and 'events' keys
-        # Use yesterday's date (today's file might not exist yet)
+        print("Fetching yesterday's business formations...")
         yesterday = datetime.now() - timedelta(days=1)
         all_data = scraper.scrape_all(date=yesterday)
 
-        # Get all formations
         formations = all_data.get('formations', [])
 
-        # NO LIMIT - get all entities
-        entities = formations[:limit] if limit else formations
+        if not formations:
+            print("[OK] No formations found")
+            return {'total': 0, 'ingested': 0, 'duplicates': 0}
 
-        if not entities:
-            return {'total': 0, 'ingested': 0}
-
-        print(f"Found {len(entities)} business entities\n")
+        print(f"Found {len(formations)} business entities")
 
         async with db_manager.get_session() as db_session:
             ingested = 0
             duplicates = 0
 
-            for i, entity in enumerate(entities, 1):
+            for i, entity in enumerate(formations, 1):
                 result = await ingestion_service.ingest(
                     fact_type='llc_formation',
                     source_url='https://dos.myflorida.com/sunbiz/',
@@ -429,117 +427,153 @@ async def run_sunbiz_scraper(market_config, limit=None):
                     ingested += 1
 
                 if i % 20 == 0:
-                    print(f"  Progress: {i}/{len(entities)}")
+                    print_progress(i, len(formations), "Sunbiz Entities")
 
+            print_progress(len(formations), len(formations), "Sunbiz Entities")
             await db_session.commit()
 
-        print(f"[OK] Sunbiz: {ingested} ingested, {duplicates} duplicates")
-        return {'total': len(entities), 'ingested': ingested, 'duplicates': duplicates}
+        print(f"[OK] Ingested: {ingested}, Duplicates: {duplicates}")
+        return {'total': len(formations), 'ingested': ingested, 'duplicates': duplicates}
 
     except Exception as e:
-        print(f"[ERROR] {str(e)[:200]}")
-        import traceback
-        traceback.print_exc()
+        print(f"[ERROR] {str(e)}")
         return {'total': 0, 'ingested': 0, 'error': str(e)}
 
 
-async def main():
-    """Run all scrapers"""
+async def run_entity_resolution():
+    """Run entity resolution to link contractors"""
+    print_header("8. ENTITY RESOLUTION")
 
-    print("=" * 80)
-    print("RUNNING ALL SCRAPERS - GAINESVILLE, FL (MULTI-MARKET)")
-    print("=" * 80)
+    try:
+        print("Running entity resolution...")
+        print("(This links contractors to LLCs and builds relationships)")
 
-    # Initialize database
-    await db_manager.initialize()
+        # Import and run entity resolution
+        from scripts.run_entity_resolution import main as entity_resolution_main
 
-    # Load market config
-    market_config = load_market_config("gainesville_fl")
-    print(f"\nMarket: {market_config.market.name}")
+        # Run entity resolution (it's async)
+        result = await entity_resolution_main()
 
-    # Initialize CurrentMarket context (CRITICAL for multi-market support)
-    await CurrentMarket.initialize(market_code='gainesville_fl')
-    print(f"CurrentMarket initialized: {CurrentMarket.get_code()} ({CurrentMarket.get_id()})")
+        print("[OK] Entity resolution complete")
+        return {'success': True}
 
-    results = {}
+    except Exception as e:
+        print(f"[ERROR] {str(e)}")
+        return {'success': False, 'error': str(e)}
 
-    # Run all scrapers
-    print("\n" + "=" * 80)
-    print("STARTING SCRAPERS")
-    print("=" * 80)
 
-    results['city_permits'] = await run_city_permits(market_config, days_back=30)
-    results['county_permits'] = await run_county_permits(market_config, days_back=30)
-    results['crime'] = await run_crime_scraper(market_config, days_back=30)
-    results['news'] = await run_news_scraper(market_config)
-    results['council'] = await run_council_scraper(market_config, months_back=3)
-    results['census'] = await run_census_scraper(market_config, market_id='gainesville_fl')
-    results['sunbiz'] = await run_sunbiz_scraper(market_config, limit=None)  # No limit!
-
-    # Final summary
-    print("\n" + "=" * 80)
-    print("SCRAPING COMPLETE - SUMMARY")
-    print("=" * 80)
-
-    total_ingested = 0
-    for source, stats in results.items():
-        print(f"\n{source.upper().replace('_', ' ')}:")
-        print(f"  Total found: {stats.get('total', 0)}")
-        # Census uses 'stored' instead of 'ingested'
-        ingested = stats.get('ingested', stats.get('stored', 0))
-        print(f"  Ingested: {ingested}")
-        if 'duplicates' in stats:
-            print(f"  Duplicates: {stats['duplicates']}")
-        if 'error' in stats:
-            print(f"  ERROR: {stats['error'][:100]}")
-        total_ingested += ingested
-
-    print(f"\nTOTAL NEW RECORDS INGESTED: {total_ingested}")
-
-    # Show database stats
-    print("\n" + "=" * 80)
-    print("DATABASE STATISTICS")
-    print("=" * 80)
+async def show_database_stats():
+    """Show final database statistics"""
+    print_header("DATABASE STATISTICS")
 
     async with db_manager.get_session() as db_session:
         from sqlalchemy import text
 
-        stats = {}
         tables = [
+            ('bulk_property_records', 'Properties (CAMA)'),
             ('entities', 'Entities'),
-            ('permits', 'Permits (City + County)'),
+            ('permits', 'Permits (Total)'),
             ('crime_reports', 'Crime Reports'),
             ('news_articles', 'News Articles'),
             ('council_meetings', 'Council Meetings'),
             ('llc_formations', 'LLC Formations'),
-            ('market_demographics', 'Market Demographics (Census)'),
-            ('raw_facts', 'Raw Facts (Total)'),
-            ('properties', 'Properties'),
-            ('bulk_property_records', 'Bulk Property Records (CAMA)'),
-            ('bulk_llc_records', 'Bulk LLC Records (Sunbiz)')
+            ('ordinance_embeddings', 'Ordinance Chunks'),
+            ('entity_market_properties', 'Entity-Property Links'),
+            ('market_demographics', 'Demographics')
         ]
 
         for table, label in tables:
             try:
                 count = await db_session.scalar(text(f"SELECT COUNT(*) FROM {table}"))
-                stats[label] = count
-            except Exception as e:
-                stats[label] = f"Error: {str(e)[:50]}"
+                print(f"{label:.<45} {count:>10,}")
+            except:
+                print(f"{label:.<45} {'(not found)':>10}")
 
-        for label, count in stats.items():
-            if isinstance(count, int):
-                print(f"{label:.<50} {count:>10,}")
-            else:
-                print(f"{label:.<50} {count}")
 
-    print("\n" + "=" * 80)
-    print("ALL SCRAPERS COMPLETE")
+async def main():
+    """Run comprehensive scraping with backfill"""
+
     print("=" * 80)
-    print("\nNext Steps:")
-    print("  - Import CAMA bulk data: python scripts/bulk_data_sync.py")
-    print("  - Import Sunbiz bulk data: (bulk scraper)")
-    print("  - Run entity resolution across markets")
+    print(" COMPREHENSIVE SCRAPER - PRE-AWS MIGRATION")
+    print("=" * 80)
+    print(f" Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f" Market: Gainesville, FL")
+    print(f" Backfill: Last 14 days (permits + crime)")
+    print("=" * 80)
+    print("\nDuplication Prevention: ✓ Automatic via DataIngestionService")
+    print("Safe to run multiple times - duplicates will be skipped\n")
+
+    start_time = datetime.now()
+
+    # Initialize
+    await db_manager.initialize()
+    market_config = load_market_config("gainesville_fl")
+    await CurrentMarket.initialize(market_code='gainesville_fl')
+
+    results = {}
+
+    # Run all scrapers with backfill
+    results['city_permits'] = await scrape_city_permits_backfill(market_config, days_back=14)
+    results['county_permits'] = await scrape_county_permits_backfill(market_config, days_back=14)
+    results['crime'] = await scrape_crime_backfill(market_config, days_back=14)
+    results['news'] = await scrape_news(market_config)
+    results['council'] = await scrape_council(market_config)
+    results['census'] = await scrape_census(market_config)
+    results['sunbiz'] = await scrape_sunbiz(market_config)
+
+    # Run entity resolution
+    results['entity_resolution'] = await run_entity_resolution()
+
+    # Summary
+    end_time = datetime.now()
+    duration = end_time - start_time
+
+    print_header("SCRAPING COMPLETE - SUMMARY")
+
+    total_new = 0
+    total_duplicates = 0
+
+    for source, stats in results.items():
+        ingested = stats.get('ingested', stats.get('stored', 0))
+        duplicates = stats.get('duplicates', 0)
+        errors = stats.get('errors', 0)
+
+        if ingested > 0:
+            print(f"\n{source.upper().replace('_', ' ')}:")
+            print(f"  New records: {ingested}")
+            if duplicates > 0:
+                print(f"  Duplicates skipped: {duplicates}")
+            if errors > 0:
+                print(f"  Errors: {errors}")
+
+        total_new += ingested
+        total_duplicates += duplicates
+
+    print(f"\nTOTAL NEW RECORDS: {total_new:,}")
+    print(f"TOTAL DUPLICATES SKIPPED: {total_duplicates:,}")
+    print(f"Duration: {duration}")
+
+    # Show database stats
+    await show_database_stats()
+
+    print_header("READY FOR AWS MIGRATION")
+    print("Database is now up-to-date with fresh data!")
+    print("\nNext steps:")
+    print("  1. Export database: pg_dump dominion > dominion_fresh.sql")
+    print("  2. Import to Aurora: psql -h aurora-endpoint < dominion_fresh.sql")
+    print("  3. Test agent on AWS")
+
+    await db_manager.shutdown()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n\nScraping interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n\nFATAL ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

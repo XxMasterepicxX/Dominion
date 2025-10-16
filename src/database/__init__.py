@@ -1,7 +1,7 @@
 # Database package for Dominion Real Estate Intelligence - Multi-Market V2
 
-from .connection import DatabaseManager
-from .models import (
+from database.connection import DatabaseManager
+from database.models import (
     Base,
     # Global layer
     Market,

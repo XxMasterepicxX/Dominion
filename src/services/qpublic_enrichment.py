@@ -19,9 +19,9 @@ from sqlalchemy import select, update, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
-from ..database import DatabaseManager
-from ..database.models import BulkPropertyRecord, BulkDataSnapshot
-from ..scrapers.data_sources.qpublic_scraper import QPublicBrowserScraperFast
+from database import DatabaseManager
+from database.models import BulkPropertyRecord, BulkDataSnapshot
+from scrapers.data_sources.qpublic_scraper import QPublicBrowserScraperFast
 
 logger = structlog.get_logger(__name__)
 

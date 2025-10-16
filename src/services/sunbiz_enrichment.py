@@ -11,8 +11,8 @@ from datetime import datetime
 import structlog
 from difflib import SequenceMatcher
 
-from ..scrapers.data_sources.sunbiz_website import SunbizWebsiteScraper
-from ..database.connection import db_manager
+from scrapers.data_sources.sunbiz_website import SunbizWebsiteScraper
+from database.connection import db_manager
 
 logger = structlog.get_logger(__name__)
 

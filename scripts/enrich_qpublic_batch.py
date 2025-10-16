@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.database.connection import db_manager
 from src.database.models import BulkPropertyRecord
 from src.config import CurrentMarket
-from src.scrapers.data_sources.qpublic_property_browser_fast import QPublicBrowserScraperFast
+from src.scrapers.data_sources.qpublic_scraper import QPublicBrowserScraperFast
 from sqlalchemy import select, update, func
 import structlog
 import argparse
