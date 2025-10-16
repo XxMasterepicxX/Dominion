@@ -115,3 +115,7 @@ temp/
 # Documentation
 docs/
 ./docs
+
+# Allow tracking helpers in frontend/src/lib
+!frontend/src/lib/
+!frontend/src/lib/cn.ts
