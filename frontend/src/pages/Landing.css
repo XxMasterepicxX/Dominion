@@ -135,11 +135,9 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: min(65vw, 800px);
-  max-width: 100%;
+  width: min(520px, 45vw);
   margin-left: auto;
   aspect-ratio: 1 / 1;
-  /* Reduce top margin for tighter spacing */
   margin-top: clamp(8px, 2vh, 24px);
 }
 
@@ -148,7 +146,6 @@
   /* Make the globe fill the entire wrapper */
   width: 100%;
   height: 100%;
-  max-width: 100%;
   aspect-ratio: 1 / 1;
 }
 
@@ -342,7 +339,19 @@
 .landing__split-copy {
   display: flex;
   flex-direction: column;
-  gap: clamp(20px, 4vw, 36px);
+  /* Tighter spacing for the Signals text block */
+  gap: clamp(8px, 1.4vw, 16px);
+}
+
+/* Reduce default margins and tighten line-height for the Signals heading and paragraph */
+.landing__split-copy h2 {
+  margin: 0;
+  line-height: 1.15;
+}
+
+.landing__split-copy > p {
+  margin: 0;
+  line-height: 1.5;
 }
 
 .landing__signal-grid {
@@ -577,3 +586,6 @@
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   }
 }
+
+
+

@@ -74,6 +74,8 @@ export const mockDashboardState: DashboardState = {
       entities: 89,
       activeEntities: 17,
       recentActivity: 'HIGH - D.R. Horton: 171 acquisitions in 2025',
+      confidence: 0.88,
+      confidenceLabel: 'High confidence',
     },
     {
       location: [27.9506, -82.4572],
@@ -84,6 +86,8 @@ export const mockDashboardState: DashboardState = {
       entities: 241,
       activeEntities: 36,
       recentActivity: 'Permit velocity spike: +37% MoM commercial permits',
+      confidence: 0.62,
+      confidenceLabel: 'Medium confidence',
     },
     {
       location: [30.3322, -81.6557],
@@ -94,6 +98,8 @@ export const mockDashboardState: DashboardState = {
       entities: 203,
       activeEntities: 22,
       recentActivity: 'LLC cluster enrichment around logistics corridor',
+      confidence: 0.34,
+      confidenceLabel: 'Low confidence',
     },
   ],
   reportContent: {

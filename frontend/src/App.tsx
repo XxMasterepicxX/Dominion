@@ -10,6 +10,7 @@ import { ProjectCreate } from './pages/ProjectCreate';
 const AppShell = () => {
   const location = useLocation();
   const hideNav = location.pathname === '/dashboard';
+  const hideFooter = location.pathname === '/dashboard';
   return (
     <div className="app-shell">
       {!hideNav && <Navigation />}
@@ -21,7 +22,7 @@ const AppShell = () => {
           <Route path="/dashboard" element={<Dashboard />} />
         </Routes>
       </main>
-      <Footer />
+      {!hideFooter && <Footer />}
     </div>
   );
 };

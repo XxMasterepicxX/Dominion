@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Globe } from '../components/Globe';
+import { StaticCanvasGlobe } from '../components/StaticCanvasGlobe';
 import './Landing.css';
 
 const metrics = [
@@ -47,6 +47,11 @@ const signalHighlights = [
     description:
       'Cross-referenced news and council transcripts tied to targeted entities, auto-summarised for investor briefings.',
   },
+  {
+    title: 'Risk Monitor',
+    stat: '9 triggers',
+    description: 'Automated legal, zoning, and capital stack alerts surfaced for analyst review within minutes of filing.',
+  },
 ];
 
 export const Landing = () => {
@@ -81,7 +86,7 @@ export const Landing = () => {
           </div>
           <div className="landing__hero-visual" aria-hidden="true">
             <div className="landing__hero-globe-wrapper">
-              <Globe className="landing__hero-globe" config={{ scale: 1.05 }} />
+              <StaticCanvasGlobe className="landing__hero-globe" />
             </div>
           </div>
         </div>

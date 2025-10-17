@@ -45,6 +45,8 @@ export interface MarketMarker {
   entities: number;
   activeEntities: number;
   recentActivity?: string;
+  confidence?: number;
+  confidenceLabel?: string;
 }
 
 export interface MissionDensity {
