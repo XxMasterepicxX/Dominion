@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import logo from '../assets/logo.png';
 import { Globe } from '../components/Globe';
+import { LoadingScreen } from '../components/LoadingScreen';
+import { MarketMap } from '../components/MarketMap';
 import { connectDashboardUpdates, fetchDashboardState } from '../services/dashboard';
-import type { DashboardState } from '../types/dashboard';
+import type { DashboardState, MarketMarker } from '../types/dashboard';
 import './Dashboard.css';
 
 type PanelKey = 'report' | 'opportunities' | 'activity';
@@ -40,6 +42,60 @@ const formatConfidence = (value?: number) => {
 const formatToolName = (toolName: string) =>
   toolName.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 
+const DASHBOARD_CACHE_PREFIX = 'dominion/dashboard/';
+const DASHBOARD_CACHE_VERSION = 1;
+const DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 20; // 20 minutes
+
+type CachedDashboardEnvelope = {
+  version: number;
+  savedAt: number;
+  state: DashboardState;
+};
+
+const dashboardCacheKey = (projectId: string) => `${DASHBOARD_CACHE_PREFIX}${projectId}`;
+
+const loadCachedDashboardState = (projectId: string): DashboardState | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(dashboardCacheKey(projectId));
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as CachedDashboardEnvelope;
+    if (!parsed || parsed.version !== DASHBOARD_CACHE_VERSION || !parsed.state) {
+      return null;
+    }
+    if (Date.now() - parsed.savedAt > DASHBOARD_CACHE_TTL_MS) {
+      window.localStorage.removeItem(dashboardCacheKey(projectId));
+      return null;
+    }
+    if (parsed.state.project?.id !== projectId) {
+      return null;
+    }
+    return parsed.state;
+  } catch {
+    return null;
+  }
+};
+
+const persistDashboardState = (projectId: string, state: DashboardState) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    const payload: CachedDashboardEnvelope = {
+      version: DASHBOARD_CACHE_VERSION,
+      savedAt: Date.now(),
+      state,
+    };
+    window.localStorage.setItem(dashboardCacheKey(projectId), JSON.stringify(payload));
+  } catch {
+    // Ignore storage errors (quota, private mode, etc.)
+  }
+};
+
 export const Dashboard = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -47,6 +103,10 @@ export const Dashboard = () => {
   const [activePanel, setActivePanel] = useState<PanelKey>('report');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'globe' | 'map'>('globe');
+  const [selectedMarket, setSelectedMarket] = useState<MarketMarker | null>(null);
+  const [globeReady, setGlobeReady] = useState(false);
+  const [introProgress, setIntroProgress] = useState(8);
 
   const requestedProjectId = searchParams.get('projectId') ?? undefined;
   const projectId = state?.project.id ?? requestedProjectId ?? undefined;
@@ -56,28 +116,56 @@ export const Dashboard = () => {
       setState(null);
       setError(null);
       setLoading(false);
+      setGlobeReady(false);
+      setIntroProgress(8);
       navigate('/projects', { replace: true });
       return;
     }
 
     const controller = new AbortController();
-    setLoading(true);
-    setState(null);
+    let isActive = true;
+
+    setGlobeReady(false);
+    setError(null);
+
+    const cachedState = loadCachedDashboardState(requestedProjectId);
+    if (cachedState) {
+      setState(cachedState);
+      setLoading(false);
+      setIntroProgress((prev) => (prev < 92 ? 92 : prev));
+    } else {
+      setState(null);
+      setLoading(true);
+      setIntroProgress(8);
+    }
+
     fetchDashboardState({ projectId: requestedProjectId, signal: controller.signal })
       .then((data) => {
+        if (!isActive) {
+          return;
+        }
         setState(data);
         setError(null);
       })
       .catch((err) => {
+        if (!isActive && err.name === 'AbortError') {
+          return;
+        }
         if (err.name !== 'AbortError') {
           setError('Unable to load project report.');
         }
       })
       .finally(() => {
-        setLoading(false);
-      });
+        if (isActive) {
+          setLoading(false);
+        }
+      })
+    ;
 
-    return () => controller.abort();
+    return () => {
+      isActive = false;
+      controller.abort();
+    };
   }, [navigate, requestedProjectId]);
 
   useEffect(() => {
@@ -112,21 +200,145 @@ export const Dashboard = () => {
     };
   }, [projectId]);
 
-  const markers = useMemo(
-    () =>
-      state?.markets.map((marker) => ({
-        location: marker.location,
-        size: marker.size,
-      })) ?? [],
-    [state],
-  );
-  const globeConfig = useMemo(() => ({ markers }), [markers]);
+  useEffect(() => {
+    if (!state?.project.id) {
+      return;
+    }
+    setViewMode('globe');
+    setSelectedMarket(null);
+  }, [state?.project.id]);
+
+  useEffect(() => {
+    if (selectedMarket && viewMode !== 'map') {
+      setViewMode('map');
+    }
+  }, [selectedMarket, viewMode]);
+
+  useEffect(() => {
+    if (!state?.project.id) {
+      return;
+    }
+    persistDashboardState(state.project.id, state);
+  }, [state]);
+
+  const isWaitingForGlobe = Boolean(state && !globeReady);
+  const targetProgress = !state ? (loading ? 72 : 12) : globeReady ? 100 : 92;
+
+  useEffect(() => {
+    if (introProgress >= targetProgress) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setIntroProgress((prev) => {
+        if (prev >= targetProgress) {
+          return prev;
+        }
+        const delta = targetProgress - prev;
+        const increment = Math.max(1, Math.round(delta * 0.2));
+        return Math.min(targetProgress, prev + increment);
+      });
+    }, 90);
+    return () => window.clearTimeout(timer);
+  }, [introProgress, targetProgress]);
+
+  const introProjectLine = useMemo(() => {
+    if (state) {
+      return `${state.project.name} · ${state.project.market}`;
+    }
+    if (requestedProjectId) {
+      return `Project ${requestedProjectId}`;
+    }
+    return undefined;
+  }, [requestedProjectId, state]);
+
+  const { status: introStatus, detail: introDetail, caption: introCaption } = useMemo(() => {
+    const withProject = (base?: string) => {
+      if (introProjectLine) {
+        return base ? `${base} · ${introProjectLine}` : introProjectLine;
+      }
+      return base;
+    };
+
+    if (!state) {
+      if (introProgress < 28) {
+        return {
+          status: 'Connecting to Dominion relays',
+          detail: withProject('Negotiating credentials'),
+          caption: 'Requesting project manifest',
+        };
+      }
+      if (introProgress < 64) {
+        return {
+          status: 'Collecting market telemetry',
+          detail: withProject('Streaming intelligence feeds'),
+          caption: 'Awaiting data payload',
+        };
+      }
+      return {
+        status: 'Assembling command interface',
+        detail: withProject('Staging dashboards'),
+        caption: 'Preparing surface layout',
+      };
+    }
+
+    if (!globeReady) {
+      if (introProgress < 96) {
+        return {
+          status: 'Aligning orbital viewport',
+          detail: withProject('Positioning geospatial focus'),
+          caption: 'Calibrating spatial renderer',
+        };
+      }
+      return {
+        status: 'Sealing command surface',
+        detail: withProject('Locking navigation controls'),
+        caption: 'Finalizing interface',
+      };
+    }
+
+    return {
+      status: 'Dispatching command surface',
+      detail: withProject('Dominion systems nominal'),
+      caption: 'Ready to deploy',
+    };
+  }, [globeReady, introProgress, introProjectLine, state]);
+
+  const showIntroOverlay = isWaitingForGlobe || introProgress < 100;
+
+  const markers = useMemo(() => state?.markets ?? [], [state]);
+  const primaryMarket = useMemo<MarketMarker | null>(() => {
+    if (!state) {
+      return null;
+    }
+    const byMarketCode = state.markets.find((market) => market.marketCode === state.project.marketCode);
+    const byLabel = state.markets.find((market) => market.label === state.project.market);
+    return byMarketCode ?? byLabel ?? state.markets[0] ?? null;
+  }, [state]);
+  const isMapView = viewMode === 'map' && !!selectedMarket;
+  const handleGlobeReady = useCallback(() => {
+    setGlobeReady(true);
+  }, []);
 
   if (!state) {
+    if (loading) {
+      return (
+        <div className="dashboard dashboard--ready">
+          <LoadingScreen
+            className="dashboard__loading-screen"
+            subtitle="Command center handshake"
+            status={introStatus}
+            detail={introDetail}
+            progress={introProgress}
+            progressCaption={introCaption}
+          />
+        </div>
+      );
+    }
+
     return (
       <div className="dashboard dashboard--ready">
         <div className="dashboard__loading">
-          <span>{loading ? 'Loading project report...' : error ?? 'No project data available.'}</span>
+          <span>{error ?? 'No project data available.'}</span>
         </div>
       </div>
     );
@@ -134,6 +346,52 @@ export const Dashboard = () => {
 
   return (
     <div className="dashboard dashboard--ready">
+      {showIntroOverlay && (
+        <LoadingScreen
+          className="dashboard__loading-screen"
+          subtitle="Command center handshake"
+          status={introStatus}
+          detail={introDetail}
+          progress={introProgress}
+          progressCaption={introCaption}
+        />
+      )}
+      <div className={`dashboard__backdrop${isMapView ? ' dashboard__backdrop--map' : ''}`}>
+        <div className="dashboard__backdrop-layer dashboard__backdrop-layer--globe">
+          <Globe
+            className="dashboard__globe"
+            markers={markers}
+            focusMarket={selectedMarket ?? primaryMarket}
+            autoRotate={false}
+            onReady={handleGlobeReady}
+            onMarkerSelect={(marker) => {
+              const candidate =
+                markers.find(
+                  (item) =>
+                    item.marketCode === marker.marketCode &&
+                    item.location[0] === marker.location[0] &&
+                    item.location[1] === marker.location[1],
+                ) ?? (marker as MarketMarker);
+              setSelectedMarket(candidate);
+              setViewMode('map');
+            }}
+          />
+        </div>
+        {isMapView && selectedMarket && (
+          <div className="dashboard__backdrop-layer dashboard__backdrop-layer--map">
+            <MarketMap
+              market={selectedMarket}
+              className="dashboard__map"
+              renderOverlay={false}
+              onBack={() => {
+                setViewMode('globe');
+                setSelectedMarket(null);
+              }}
+            />
+          </div>
+        )}
+      </div>
+
       <div className="dashboard__screen">
         <aside className="dashboard__sidebar">
           <div className="dashboard__sidebar-header">
@@ -187,36 +445,42 @@ export const Dashboard = () => {
           </div>
         </aside>
 
-        <section className="dashboard__globe-stage">
-          <div className="dashboard__globe-wrapper">
-            <Globe className="dashboard__globe" config={globeConfig} />
-            <div className="dashboard__globe-overlay">
-              <span>{state.trackingDensity.label}</span>
-              <strong>{state.trackingDensity.value}</strong>
-            </div>
+        <section className={`dashboard__globe-stage${isMapView ? ' dashboard__globe-stage--map' : ''}`}>
+          <div className="dashboard__globe-overlay">
+            <span>{state.trackingDensity.label}</span>
+            <strong>{state.trackingDensity.value}</strong>
           </div>
-
-          <div className="dashboard__focus-card">
-            <header>
-              <span>{state.focusCard.header}</span>
-              <span
-                className={`dashboard__focus-card-tag dashboard__focus-card-tag--${state.focusCard.tagType}`}
-              >
-                {state.focusCard.tag}
-              </span>
-            </header>
-            <div className="dashboard__focus-card-body">
-              <p>{state.focusCard.summary}</p>
-              <div className="dashboard__focus-grid">
+          {isMapView && (
+            <div className="dashboard__focus-card">
+              <div className="dashboard__focus-card-main">
+                <div className="dashboard__focus-card-title">
+                  <span>{state.focusCard.header}</span>
+                  <span className={`dashboard__focus-card-tag dashboard__focus-card-tag--${state.focusCard.tagType}`}>
+                    {state.focusCard.tag}
+                  </span>
+                </div>
+                <p className="dashboard__focus-card-summary">{state.focusCard.summary}</p>
+              </div>
+              <div className="dashboard__focus-card-stats">
                 {state.focusCard.stats.map((stat) => (
                   <div key={stat.label}>
                     <span className="dashboard__focus-label">{stat.label}</span>
                     <strong>{stat.value}</strong>
                   </div>
                 ))}
+                <button
+                  type="button"
+                  className="dashboard__focus-card-back"
+                  onClick={() => {
+                    setViewMode('globe');
+                    setSelectedMarket(null);
+                  }}
+                >
+                  Back to globe
+                </button>
               </div>
             </div>
-          </div>
+          )}
         </section>
 
         <aside className="dashboard__widgets">
@@ -253,76 +517,78 @@ export const Dashboard = () => {
                   <span>Report</span>
                   <span className="dashboard__widget-tag">Dominion Intelligence</span>
                 </header>
-                <div className="dashboard__report-meta">
-                  <div>
-                    <span>Confidence</span>
-                    <strong>{`${state.reportContent.confidenceLabel} (${formatConfidence(
-                      state.reportContent.confidence,
-                    )})`}</strong>
-                  </div>
-                  <div>
-                    <span>Coverage</span>
-                    <strong>{state.reportContent.dataCoverage}</strong>
-                  </div>
-                  <div>
-                    <span>Analysis</span>
-                    <strong>{state.reportContent.analysisType}</strong>
-                  </div>
-                </div>
-                <p className="dashboard__report-summary">{state.reportContent.summary}</p>
-                {state.reportContent.marketContext && (
-                  <p className="dashboard__report-market">{state.reportContent.marketContext}</p>
-                )}
-
-                <div className="dashboard__report-sections">
-                  {state.reportContent.sections.map((section) => (
-                    <section key={section.title} className="dashboard__report-section">
-                      <header>
-                        <h3>{section.title}</h3>
-                      </header>
-                      <p>{section.content}</p>
-                      {section.metrics && (
-                        <ul className="dashboard__report-metrics">
-                          {section.metrics.map((metric) => (
-                            <li
-                              key={`${section.title}-${metric.label}`}
-                              className={metric.highlight ? 'dashboard__report-metric--highlight' : ''}
-                            >
-                              <span>{metric.label}</span>
-                              <strong>{metric.value}</strong>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </section>
-                  ))}
-                </div>
-
-                <div className="dashboard__report-next">
-                  <span>Next actions</span>
-                  <ul>
-                    {state.reportContent.nextActions.map((step) => (
-                      <li key={step}>{step}</li>
-                    ))}
-                  </ul>
-                </div>
-
-                {state.reportContent.sources && (
-                  <div className="dashboard__report-sources">
+                <div className="dashboard__widget-scroll">
+                  <div className="dashboard__report-meta">
                     <div>
-                      <span>Tools</span>
-                      <strong>{state.reportContent.sources.tools.join(' | ')}</strong>
-                    </div>
-                    <div>
-                      <span>Data</span>
-                      <strong>{state.reportContent.sources.databases.join(' | ')}</strong>
+                      <span>Confidence</span>
+                      <strong>{`${state.reportContent.confidenceLabel} (${formatConfidence(
+                        state.reportContent.confidence,
+                      )})`}</strong>
                     </div>
                     <div>
                       <span>Coverage</span>
-                      <strong>{state.reportContent.sources.coverage}</strong>
+                      <strong>{state.reportContent.dataCoverage}</strong>
+                    </div>
+                    <div>
+                      <span>Analysis</span>
+                      <strong>{state.reportContent.analysisType}</strong>
                     </div>
                   </div>
-                )}
+                  <p className="dashboard__report-summary">{state.reportContent.summary}</p>
+                  {state.reportContent.marketContext && (
+                    <p className="dashboard__report-market">{state.reportContent.marketContext}</p>
+                  )}
+
+                  <div className="dashboard__report-sections">
+                    {state.reportContent.sections.map((section) => (
+                      <section key={section.title} className="dashboard__report-section">
+                        <header>
+                          <h3>{section.title}</h3>
+                        </header>
+                        <p>{section.content}</p>
+                        {section.metrics && (
+                          <ul className="dashboard__report-metrics">
+                            {section.metrics.map((metric) => (
+                              <li
+                                key={`${section.title}-${metric.label}`}
+                                className={metric.highlight ? 'dashboard__report-metric--highlight' : ''}
+                              >
+                                <span>{metric.label}</span>
+                                <strong>{metric.value}</strong>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </section>
+                    ))}
+                  </div>
+
+                  <div className="dashboard__report-next">
+                    <span>Next actions</span>
+                    <ul>
+                      {state.reportContent.nextActions.map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {state.reportContent.sources && (
+                    <div className="dashboard__report-sources">
+                      <div>
+                        <span>Tools</span>
+                        <strong>{state.reportContent.sources.tools.join(' | ')}</strong>
+                      </div>
+                      <div>
+                        <span>Data</span>
+                        <strong>{state.reportContent.sources.databases.join(' | ')}</strong>
+                      </div>
+                      <div>
+                        <span>Coverage</span>
+                        <strong>{state.reportContent.sources.coverage}</strong>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </>
             )}
 
@@ -332,35 +598,37 @@ export const Dashboard = () => {
                   <span>Opportunity queue</span>
                   <span className="dashboard__widget-tag">Auto-ranked</span>
                 </header>
-                <ul className="dashboard__queue">
-                  {state.opportunityQueue.map((row) => (
-                    <li key={row.id}>
-                      <div className="dashboard__queue-entity">
-                        <span className="dashboard__queue-name">{row.entity ?? row.property ?? row.market}</span>
-                        <span className="dashboard__queue-market">{row.market}</span>
-                      </div>
-                      <div className="dashboard__queue-meta">
-                        <span>{row.signal}</span>
-                        <span>Lead {row.leadTime}</span>
-                        <span className="dashboard__queue-confidence">
-                          Confidence{' '}
-                          <strong>{`${row.confidenceLabel} (${formatConfidence(row.confidence)})`}</strong>
-                        </span>
-                      </div>
-                      <div className="dashboard__queue-meta">
-                        <span>Action: {row.action}</span>
-                        {row.estimatedReturn && <span>Return {row.estimatedReturn}</span>}
-                      </div>
-                      {row.risks && row.risks.length > 0 && (
-                        <div className="dashboard__queue-risks">Risks: {row.risks.join(' | ')}</div>
-                      )}
-                      <div className="dashboard__queue-status">
-                        <span className={`dashboard__queue-status-dot dashboard__queue-status-dot--${row.status}`} />
-                        <span>{row.status.replace('_', ' ')}</span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <div className="dashboard__widget-scroll">
+                  <ul className="dashboard__queue">
+                    {state.opportunityQueue.map((row) => (
+                      <li key={row.id}>
+                        <div className="dashboard__queue-entity">
+                          <span className="dashboard__queue-name">{row.entity ?? row.property ?? row.market}</span>
+                          <span className="dashboard__queue-market">{row.market}</span>
+                        </div>
+                        <div className="dashboard__queue-meta">
+                          <span>{row.signal}</span>
+                          <span>Lead {row.leadTime}</span>
+                          <span className="dashboard__queue-confidence">
+                            Confidence{' '}
+                            <strong>{`${row.confidenceLabel} (${formatConfidence(row.confidence)})`}</strong>
+                          </span>
+                        </div>
+                        <div className="dashboard__queue-meta">
+                          <span>Action: {row.action}</span>
+                          {row.estimatedReturn && <span>Return {row.estimatedReturn}</span>}
+                        </div>
+                        {row.risks && row.risks.length > 0 && (
+                          <div className="dashboard__queue-risks">Risks: {row.risks.join(' | ')}</div>
+                        )}
+                        <div className="dashboard__queue-status">
+                          <span className={`dashboard__queue-status-dot dashboard__queue-status-dot--${row.status}`} />
+                          <span>{row.status.replace('_', ' ')}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </>
             )}
 
@@ -370,22 +638,24 @@ export const Dashboard = () => {
                   <span>Activity log</span>
                   <span className="dashboard__widget-tag dashboard__widget-tag--accent">Tool executions</span>
                 </header>
-                <ul className="dashboard__timeline">
-                  {state.activityLog.map((item) => (
-                    <li key={item.id}>
-                      <div className="dashboard__timeline-header">
-                        <span>{formatToolName(item.toolName)}</span>
-                        <span>{formatRelativeTime(item.timestamp)}</span>
-                      </div>
-                      <p>{item.description}</p>
-                      <span className="dashboard__timeline-status">
-                        {item.status === 'complete' ? 'Complete' : item.status}
-                        {item.duration ? ` | ${item.duration}` : ''}
-                      </span>
-                      <p className="dashboard__timeline-result">{item.result}</p>
-                    </li>
-                  ))}
-                </ul>
+                <div className="dashboard__widget-scroll">
+                  <ul className="dashboard__timeline">
+                    {state.activityLog.map((item) => (
+                      <li key={item.id}>
+                        <div className="dashboard__timeline-header">
+                          <span>{formatToolName(item.toolName)}</span>
+                          <span>{formatRelativeTime(item.timestamp)}</span>
+                        </div>
+                        <p>{item.description}</p>
+                        <span className="dashboard__timeline-status">
+                          {item.status === 'complete' ? 'Complete' : item.status}
+                          {item.duration ? ` | ${item.duration}` : ''}
+                        </span>
+                        <p className="dashboard__timeline-result">{item.result}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </>
             )}
           </article>

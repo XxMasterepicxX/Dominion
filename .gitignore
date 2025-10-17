@@ -85,6 +85,9 @@ browser_data/
 *.csv
 data/*.json
 data/*.txt
+!frontend/src/data/
+!frontend/src/data/*.json
+!frontend/src/data/*.geojson
 
 # Bulk data downloads (large files)
 CAMA/
