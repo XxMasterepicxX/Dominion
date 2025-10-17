@@ -23,10 +23,10 @@ logger = structlog.get_logger()
 # Use us-east-1 where all Lambda functions are deployed
 lambda_client = boto3.client('lambda', region_name='us-east-1')
 
-# Lambda function ARNs from environment
-INTELLIGENCE_FUNCTION_ARN = os.environ['INTELLIGENCE_FUNCTION_ARN']
-RAG_FUNCTION_ARN = os.environ['RAG_FUNCTION_ARN']
-ENRICHMENT_FUNCTION_ARN = os.environ['ENRICHMENT_FUNCTION_ARN']
+# Lambda function ARNs - Use actual function names with fallback to environment
+INTELLIGENCE_FUNCTION_ARN = os.environ.get('INTELLIGENCE_FUNCTION_ARN', 'Dominion-Tools-IntelligenceFunctionF3B7706E-MqwpnWGzHDyP')
+RAG_FUNCTION_ARN = os.environ.get('RAG_FUNCTION_ARN', 'Dominion-Tools-RAGFunction89B11B85-269jmrt7KhBO')
+ENRICHMENT_FUNCTION_ARN = os.environ.get('ENRICHMENT_FUNCTION_ARN', 'Dominion-Tools-EnrichmentFunction65873741-Nu6t0OWMde2r')
 
 
 # Tool wrappers that invoke Lambda functions
