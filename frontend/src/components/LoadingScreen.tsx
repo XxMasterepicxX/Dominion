@@ -33,6 +33,20 @@ export const LoadingScreen = ({
     return Array.from({ length: SEGMENT_COUNT }, (_, index) => index < activeSegments);
   }, [clampedProgress]);
 
+  const detailParts = useMemo(() => {
+    if (!detail) {
+      return null;
+    }
+    const lastSeparatorIndex = detail.lastIndexOf('·');
+    if (lastSeparatorIndex === -1 || lastSeparatorIndex === detail.length - 1) {
+      return { primary: detail, location: undefined };
+    }
+    return {
+      primary: detail.slice(0, lastSeparatorIndex).trim(),
+      location: detail.slice(lastSeparatorIndex + 1).trim(),
+    };
+  }, [detail]);
+
   return (
     <div className={cn('loading-screen', className)}>
       <div className="loading-screen__core">
@@ -44,7 +58,19 @@ export const LoadingScreen = ({
 
         <div className="loading-screen__status">
           <p>{status}</p>
-          {detail && <p className="loading-screen__detail">{detail}</p>}
+          {detailParts && (
+            <p className="loading-screen__detail">
+              {detailParts.location ? (
+                <>
+                  {detailParts.primary}
+                  <br />
+                  <span className="loading-screen__detail-location">{detailParts.location}</span>
+                </>
+              ) : (
+                detailParts.primary
+              )}
+            </p>
+          )}
         </div>
 
         <div className="loading-screen__progress">

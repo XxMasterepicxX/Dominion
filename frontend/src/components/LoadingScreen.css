@@ -79,6 +79,11 @@
   color: rgba(5, 14, 24, 0.58);
 }
 
+.loading-screen__detail-location {
+  display: inline-block;
+  margin-top: 4px;
+}
+
 .loading-screen__progress {
   display: flex;
   align-items: flex-end;
