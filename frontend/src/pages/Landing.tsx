@@ -1,11 +1,13 @@
 import { Link } from 'react-router-dom';
 import { StaticCanvasGlobe } from '../components/StaticCanvasGlobe';
 import './Landing.css';
+import { getByLabelText } from '@testing-library/react';
 
 const metrics = [
   { label: 'Active data sources', value: '10+' },
   { label: 'Entity resolution accuracy', value: '95%' },
   { label: 'Opportunity detection lead time', value: '3-6 weeks' },
+  { label: 'Autonomous data collection', value: '24/7'}
 ];
 
 const capabilityCards = [

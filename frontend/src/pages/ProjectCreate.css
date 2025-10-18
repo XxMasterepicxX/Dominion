@@ -84,7 +84,12 @@
 }
 
 .project-create__grid {
+  
   display: grid;
+  /* display: flex; */
+  flex-wrap: nowrap;
+  /* justify-content: space-between; */
+  /* align-items: center; */
   gap: clamp(16px, 3vw, 24px);
 }
 
@@ -135,10 +140,16 @@
 }
 
 .project-create__type {
+  /* new line for diff font size */
+  /* padding also change from 16px 18px->8,10 */
+  /* prev gap 6px->2 */
+  font-size: 6px;  
   display: grid;
-  gap: 6px;
+  /* display: flex; */
+  /* flex: 1; */
+  gap: 2px;
   align-items: flex-start;
-  padding: 16px 18px;
+  padding: 8px 10px;
   border-radius: 18px;
   border: 1px solid rgba(68, 110, 135, 0.22);
   background: rgba(5, 14, 24, 0.02);
@@ -155,6 +166,7 @@
 }
 
 .project-create__type span {
+  
   font-size: 0.85rem;
   color: rgba(5, 14, 24, 0.65);
   line-height: 1.5;

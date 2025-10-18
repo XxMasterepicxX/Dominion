@@ -231,6 +231,7 @@ export const ProjectCreate = () => {
               <label>
                 <span>Entity name {requiredFields.includes('entityName') ? '*' : ''}</span>
                 <input
+                
                   type="text"
                   value={form.entityName ?? ''}
                   onChange={(event) => handleInput('entityName', event.target.value)}

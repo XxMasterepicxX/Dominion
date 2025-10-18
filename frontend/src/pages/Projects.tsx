@@ -68,7 +68,8 @@ export const Projects = () => {
   return (
     <div className="projects">
       <header className="projects__header">
-        <div>
+        {/* changed the classname for the div right below */}
+        <div className="projects__header-text">
           <p className="projects__eyebrow">Dominion projects</p>
           <h1>Choose a project to open its intelligence report.</h1>
           <p className="projects__lead">

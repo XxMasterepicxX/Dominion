@@ -6,9 +6,13 @@
   min-height: calc(100vh - 160px);
 }
 
+
+
 .projects__header {
   display: flex;
-  flex-wrap: wrap;
+  /* flex-wrap: wrap; */
+  flex-wrap: nowrap;
+  /* align-items: flex-end; */
   align-items: flex-end;
   justify-content: space-between;
   gap: clamp(24px, 4vw, 40px);
@@ -37,11 +41,6 @@
   line-height: 1.7;
 }
 
-.projects__header-actions {
-  display: grid;
-  gap: 8px;
-  justify-items: start;
-}
 
 .projects__new {
   border: 1px solid rgba(68, 110, 135, 0.35);
@@ -132,8 +131,10 @@
 
 .projects__card {
   display: grid;
-  gap: 18px;
-  padding: 24px;
+  /* was 18px */
+  gap: 10px;
+  /* was 24px padding */
+  padding: 12px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(68, 110, 135, 0.18);
@@ -145,6 +146,24 @@
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
+}
+
+.projects__header-actions {
+  /* changed from grid */
+  /* display: grid;
+  gap: 8px;
+  justify-items: start; */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start; /* align left edge */
+  gap: 8px;
+
+  margin-top: 16px;
+}
+
+.projects__header-text {
+  flex: 1 1 60%;      /* take ~60% width, shrink if needed */
+  min-width: 280px;   /* prevents it from being too small on mobile */
 }
 
 .projects__tags {
