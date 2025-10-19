@@ -45,11 +45,7 @@ export const Navigation = () => {
             );
           })}
         </nav>
-        <div className="nav__actions">
-          <Link className="nav__cta" to="/projects/new">
-            New project
-          </Link>
-        </div>
+        {/* CTA removed per request */}
       </div>
     </header>
   );

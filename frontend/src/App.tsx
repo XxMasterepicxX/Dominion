@@ -5,7 +5,7 @@ import { Navigation } from './components/Navigation';
 import { Dashboard } from './pages/Dashboard';
 import { Landing } from './pages/Landing';
 import { Projects } from './pages/Projects';
-import { ProjectCreate } from './pages/ProjectCreate';
+import ProjectCreate from './pages/ProjectCreate';
 
 const AppShell = () => {
   const location = useLocation();

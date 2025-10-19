@@ -68,21 +68,17 @@ export const Projects = () => {
   return (
     <div className="projects">
       <header className="projects__header">
-        {/* changed the classname for the div right below */}
-        <div className="projects__header-text">
-          <p className="projects__eyebrow">Dominion projects</p>
+        <p className="projects__eyebrow">Dominion projects</p>
+        <div className="projects__title-row">
           <h1>Choose a project to open its intelligence report.</h1>
-          <p className="projects__lead">
-            Each project bundles the full Dominion analysis, live update stream, and action queue for the market focus
-            you define.
-          </p>
-        </div>
-        <div className="projects__header-actions">
           <Link className="projects__new" to="/projects/new">
-            + New project
+            + NEW PROJECT
           </Link>
-          <span className="projects__hint">Create a project to generate a Dominion report.</span>
         </div>
+        <p className="projects__lead">
+          Each project bundles the full Dominion analysis, live update stream, and action queue for the market focus you
+          define.
+        </p>
       </header>
 
       {loading && (

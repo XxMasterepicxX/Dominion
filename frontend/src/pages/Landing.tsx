@@ -4,7 +4,6 @@ import './Landing.css';
 import { useEffect, useRef } from 'react';
 
 const metrics = [
-  { label: 'AI agent uptime', value: '24/7' },
   { label: 'Entity resolution accuracy', value: '95%' },
   { label: 'Opportunity detection lead time', value: '3-6 weeks' },
   { label: 'Properties monitored', value: '108K'}
@@ -151,20 +150,20 @@ export const Landing = () => {
             </p>
             <div className="landing__cta">
               <Link className="landing__cta-primary" to="/projects">
-                View projects
+                VIEW PROJECTS
               </Link>
               <a className="landing__cta-secondary" href="#capabilities">
-                Explore capabilities
+                EXPLORE CAPABILITIES
               </a>
             </div>
-            <dl className="landing__metrics">
+            <div className="landing__metrics">
               {metrics.map((metric) => (
-                <div key={metric.label} className="landing__metric">
-                  <dt>{metric.value}</dt>
-                  <dd>{metric.label}</dd>
+                <div key={metric.label} className="landing__metric-card">
+                  <span className="landing__metric-value">{metric.value}</span>
+                  <span className="landing__metric-label">{metric.label}</span>
                 </div>
               ))}
-            </dl>
+            </div>
           </div>
           <div className="landing__hero-visual" aria-hidden="true">
             <div className="landing__hero-globe-wrapper">
@@ -188,12 +187,12 @@ export const Landing = () => {
             <div className="landing__workflow-icon landing__workflow-icon--create">1</div>
             <span className="landing__workflow-label">Create Project</span>
           </div>
-          <div className="landing__workflow-arrow">→</div>
+          <div className="landing__workflow-arrow">&rarr;</div>
           <div className="landing__workflow-step">
             <div className="landing__workflow-icon landing__workflow-icon--analyze">2</div>
             <span className="landing__workflow-label">Agent Analyzes</span>
           </div>
-          <div className="landing__workflow-arrow">→</div>
+          <div className="landing__workflow-arrow">&rarr;</div>
           <div className="landing__workflow-step">
             <div className="landing__workflow-icon landing__workflow-icon--update">3</div>
             <span className="landing__workflow-label">Continuous Updates</span>
@@ -314,13 +313,13 @@ export const Landing = () => {
           <p className="landing__eyebrow">Intelligence Roadmap</p>
           <h2>From reactive monitoring to autonomous decision intelligence.</h2>
           <p>
-            Dominion's agent evolves through four distinct intelligence phases over 12 months. Each phase builds on the previous, adding deeper reasoning, forward-looking prediction, and autonomous decision-making. The system learns continuously—from entity patterns and market cycles to developer behavior and portfolio optimization strategies.
+            Dominion's agent evolves through four distinct intelligence phases over 12 months. Each phase builds on the previous, adding deeper reasoning, forward-looking prediction, and autonomous decision-making. The system learns continuously, from entity patterns and market cycles to developer behavior and portfolio optimization strategies.
           </p>
           <div className="landing__roadmap-progress">
             <div className="landing__roadmap-progress-bar">
               <div className="landing__roadmap-progress-fill" style={{ width: '25%' }} />
             </div>
-            <span className="landing__roadmap-progress-label">Phase 1 of 4 Complete • 12-month development cycle</span>
+            <span className="landing__roadmap-progress-label">Phase 1 of 4 Complete - 12-month development cycle</span>
           </div>
         </div>
         <div className="landing__roadmap">

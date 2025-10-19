@@ -1,4 +1,4 @@
-import { FormEvent, MouseEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+﻿import { FormEvent, MouseEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createProject } from '../services/dashboard';
 import type { ProjectSetup, ProjectType } from '../types/dashboard';
@@ -408,138 +408,6 @@ export const ProjectCreate = () => {
                 />
               )}
             </label>
-
-            </div>
-            <div className="project-create__type-selector">
-              {PROJECT_TYPES.map((projectType) => (
-                <button
-                  key={projectType.value}
-                  type="button"
-                  className={`project-create__type ${form.type === projectType.value ? 'project-create__type--active' : ''}`}
-                  onClick={() => handleInput('type', projectType.value)}
-                >
-                  <strong>{projectType.label}</strong>
-                  <span>{projectType.description}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="project-create__section">
-            <h2>Type-specific details</h2>
-            <div className="project-create__grid project-create__grid--two">
-              {(form.type === 'developer_following' || form.type === 'assemblage_investigation' || form.type === 'exit_strategy') && (
-                <label>
-                  <span>Entity name {requiredFields.includes('entityName') ? '*' : ''}</span>
-                  <input
-                    type="text"
-                    value={form.entityName ?? ''}
-                    onChange={(event) => handleInput('entityName', event.target.value)}
-                    placeholder="D R HORTON INC"
-                    required={requiredFields.includes('entityName')}
-                  />
-                </label>
-              )}
-
-            {(form.type === 'property_acquisition' || form.type === 'price_validation') && (
-              <>
-                <label>
-                  <span>Property ID {requiredFields.includes('propertyId') ? '*' : ''}</span>
-                  <input
-                    type="text"
-                    value={form.propertyId ?? ''}
-                    onChange={(event) => handleInput('propertyId', event.target.value)}
-                    placeholder="UUID or assessor ID"
-                    required={requiredFields.includes('propertyId')}
-                  />
-                </label>
-                <label>
-                  <span>Parcel ID {requiredFields.includes('parcelId') ? '*' : ''}</span>
-                  <input
-                    type="text"
-                    value={form.parcelId ?? ''}
-                    onChange={(event) => handleInput('parcelId', event.target.value)}
-                    placeholder="13785-000-000"
-                    required={requiredFields.includes('parcelId')}
-                  />
-                </label>
-              </>
-            )}
-
-            {(form.type === 'price_validation' || form.type === 'property_acquisition') && (
-              <label>
-                <span>Asking price</span>
-                <input
-                  type="number"
-                  min="0"
-                  value={form.askingPrice ?? ''}
-                  onChange={(event) => handleInput('askingPrice', event.target.value === '' ? undefined : Number(event.target.value))}
-                  placeholder="250000"
-                />
-              </label>
-            )}
-
-            {(form.type === 'market_research' || form.type === 'assemblage_investigation') && (
-              <>
-                <label>
-                  <span>Max price</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.criteria?.maxPrice ?? ''}
-                    onChange={(event) => handleCriteriaChange('maxPrice', event.target.value === '' ? undefined : Number(event.target.value))}
-                    placeholder="500000"
-                  />
-                </label>
-                <label>
-                  <span>Min lot size (sqft)</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.criteria?.minLotSize ?? ''}
-                    onChange={(event) =>
-                      handleCriteriaChange('minLotSize', event.target.value === '' ? undefined : Number(event.target.value))
-                    }
-                    placeholder="8000"
-                  />
-                </label>
-                <label>
-                  <span>Property type</span>
-                  <input
-                    type="text"
-                    value={form.criteria?.propertyType ?? ''}
-                    onChange={(event) => handleCriteriaChange('propertyType', event.target.value)}
-                    placeholder="Vacant land"
-                  />
-                </label>
-              </>
-            )}
-          </div>
-        </section>
-
-        <section className="project-create__section">
-          <h2>Analysis scope</h2>
-          <p className="project-create__section-sub">
-            Select the domains Dominion should prioritize. All projects include core intelligence, you can tailor the toggles to your
-            strategy.
-          </p>
-          <div className="project-create__scope-grid">
-            {Object.entries(form.analysisScope).map(([key, value]) => (
-              <label key={key} className={`project-create__toggle ${value ? 'project-create__toggle--active' : ''}`}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(value)}
-                  onChange={() => handleScopeToggle(key as keyof ProjectSetup['analysisScope'])}
-                />
-                <span>{key.replace(/([A-Z])/g, ' $1').toLowerCase()}</span>
-              </label>
-            ))}
-          </div>
-        </section>
-
-        <section className="project-create__section">
-          <h2>Investment parameters</h2>
-          <div className="project-create__grid project-create__grid--three">
             <label className="project-create__field">
               <span>Budget ceiling</span>
               <input
@@ -655,7 +523,7 @@ export const ProjectCreate = () => {
         <div className="project-create__title-row">
           <h1>Charter a fresh intelligence initiative.</h1>
           <Link className="project-create__back" to="/projects" onClick={handleBackToProjects}>
-            {'<< Back to projects'}
+            {'<< BACK TO PROJECTS'}
           </Link>
         </div>
         <p className="project-create__intro">

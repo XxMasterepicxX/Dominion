@@ -9,21 +9,24 @@
 
 
 .projects__header {
-  display: flex;
-  /* flex-wrap: wrap; */
-  flex-wrap: nowrap;
-  /* align-items: flex-end; */
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: clamp(24px, 4vw, 40px);
+  display: grid;
+  gap: clamp(12px, 2vw, 20px);
 }
 
 .projects__eyebrow {
-  margin: 0 0 12px;
+  margin: 0;
   letter-spacing: 0.24em;
   text-transform: uppercase;
   color: var(--color-accent);
   font-size: 0.75rem;
+}
+
+.projects__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(16px, 4vw, 32px);
+  flex-wrap: wrap;
 }
 
 .projects__header h1 {
@@ -34,23 +37,25 @@
 }
 
 .projects__lead {
-  margin: 16px 0 0;
-  max-width: 640px;
+  margin: 0;
   color: rgba(5, 14, 24, 0.7);
   font-size: 1rem;
   line-height: 1.7;
+  white-space: nowrap;
 }
 
 
 .projects__new {
+  flex-shrink: 0;
   border: 1px solid rgba(68, 110, 135, 0.35);
   border-radius: 18px;
-  padding: 12px 18px;
+  padding: 12px 20px;
   background: rgba(255, 255, 255, 0.9);
   font-family: inherit;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
+  font-size: 0.78rem;
   cursor: pointer;
   color: var(--color-ink);
   transition: border-color 0.2s ease, transform 0.2s ease;
@@ -58,14 +63,7 @@
 
 .projects__new:hover {
   border-color: var(--color-accent);
-  transform: translateY(-1px);
-}
-
-.projects__hint {
-  font-size: 0.72rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(5, 14, 24, 0.55);
+  transform: translateY(-2px);
 }
 
 .projects__state {
@@ -307,6 +305,12 @@
 .projects__open:hover {
   transform: translateX(2px);
   border-color: var(--color-accent);
+}
+
+@media (max-width: 960px) {
+  .projects__lead {
+    white-space: normal;
+  }
 }
 
 @keyframes projects-spin {

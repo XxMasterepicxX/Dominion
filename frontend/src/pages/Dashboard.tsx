@@ -420,7 +420,7 @@ export const Dashboard = () => {
               <span>{state.isLive ? 'Live updates enabled' : 'Live updates paused'}</span>
             </div>
             <button type="button" className="dashboard__sidebar-primary">
-              Export PDF
+              Export JSON
             </button>
           </div>
           <div className="dashboard__sidebar-list">
