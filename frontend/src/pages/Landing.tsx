@@ -6,7 +6,8 @@ import { useEffect, useRef } from 'react';
 const metrics = [
   { label: 'Entity resolution accuracy', value: '95%' },
   { label: 'Opportunity detection lead time', value: '3-6 weeks' },
-  { label: 'Properties monitored', value: '108K'}
+  { label: 'Properties monitored', value: '108K'},
+  { label: 'Autonomous data collection', value: '24/7'}
 ];
 
 const capabilityCards = [
