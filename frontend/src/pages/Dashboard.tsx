@@ -59,6 +59,18 @@ const loadCachedDashboardState = (projectId: string): DashboardState | null => {
     return null;
   }
   try {
+    // First try sessionStorage (for fresh agent results)
+    const sessionKey = `dominion/dashboard/${projectId}`;
+    const sessionRaw = window.sessionStorage.getItem(sessionKey);
+    if (sessionRaw) {
+      const parsed = JSON.parse(sessionRaw) as CachedDashboardEnvelope;
+      if (parsed && parsed.version === DASHBOARD_CACHE_VERSION && parsed.state) {
+        console.log('[Dashboard] Loaded from sessionStorage:', projectId);
+        return parsed.state;
+      }
+    }
+
+    // Fallback to localStorage
     const raw = window.localStorage.getItem(dashboardCacheKey(projectId));
     if (!raw) {
       return null;

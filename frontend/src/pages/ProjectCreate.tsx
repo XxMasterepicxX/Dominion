@@ -1,7 +1,8 @@
 ﻿import { FormEvent, MouseEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { createProject } from '../services/dashboard';
-import type { ProjectSetup, ProjectType } from '../types/dashboard';
+import { analyzeWithAgent, transformAgentResponseToDashboard } from '../services/dashboard';
+import type { ProjectSetup, ProjectType, DashboardState } from '../types/dashboard';
+import { LoadingScreen } from '../components/LoadingScreen';
 import './ProjectCreate.css';
 
 const PROJECT_TYPES: Array<{ value: ProjectType; label: string; description: string }> = [
@@ -70,6 +71,8 @@ export const ProjectCreate = () => {
   const [error, setError] = useState<string | null>(null);
   const [currentStageIndex, setCurrentStageIndex] = useState(0);
   const [hasChanges, setHasChanges] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [analysisStatus, setAnalysisStatus] = useState<string>('Initializing...');
 
   const requiredFields = useMemo(() => REQUIRED_BY_TYPE[form.type] ?? [], [form.type]);
   const currentStage = STAGES[currentStageIndex];
@@ -207,24 +210,101 @@ export const ProjectCreate = () => {
     setError(null);
 
     try {
-      const payload = await createProject({
-        ...form,
-        askingPrice: form.askingPrice ? Number(form.askingPrice) : undefined,
-        budget: form.budget ? Number(form.budget) : undefined,
-        criteria: {
-          ...form.criteria,
-          maxPrice: form.criteria?.maxPrice ? Number(form.criteria.maxPrice) : undefined,
-          minPrice: form.criteria?.minPrice ? Number(form.criteria.minPrice) : undefined,
-          minLotSize: form.criteria?.minLotSize ? Number(form.criteria.minLotSize) : undefined,
-          maxLotSize: form.criteria?.maxLotSize ? Number(form.criteria.maxLotSize) : undefined,
-        },
-      });
-      setHasChanges(false);
-      navigate(`/dashboard?projectId=${payload.project.id}`);
+      // Generate project ID
+      const projectId = `proj-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+      // Build comprehensive prompt with ALL form data
+      let prompt = '';
+
+      if (form.type === 'developer_following' && form.entityName) {
+        prompt = `Analyze developer "${form.entityName}" in ${form.market}.`;
+      } else if (form.type === 'property_acquisition' && form.parcelId) {
+        prompt = `Analyze property ${form.parcelId} in ${form.market}.`;
+        if (form.askingPrice) prompt += ` Asking price: $${form.askingPrice}.`;
+      } else if (form.type === 'market_research') {
+        prompt = `Find properties in ${form.market}.`;
+      } else if (form.type === 'assemblage_investigation') {
+        prompt = `Find assemblage opportunities in ${form.market}.`;
+      } else if (form.type === 'exit_strategy' && form.entityName) {
+        prompt = `Find buyers for properties owned by "${form.entityName}" in ${form.market}.`;
+      } else if (form.type === 'price_validation' && form.parcelId) {
+        prompt = `Validate asking price for property ${form.parcelId} in ${form.market}.`;
+        if (form.askingPrice) prompt += ` Asking price: $${form.askingPrice}.`;
+      } else {
+        prompt = `Analyze real estate opportunities in ${form.market}.`;
+      }
+
+      // Add criteria filters
+      const filters = [];
+      if (form.budget) filters.push(`Budget: $${form.budget}`);
+      if (form.criteria?.maxPrice) filters.push(`Max price: $${form.criteria.maxPrice}`);
+      if (form.criteria?.minPrice) filters.push(`Min price: $${form.criteria.minPrice}`);
+      if (form.criteria?.minLotSize) filters.push(`Min lot size: ${form.criteria.minLotSize} sqft`);
+      if (form.criteria?.maxLotSize) filters.push(`Max lot size: ${ form.criteria.maxLotSize} sqft`);
+      if (form.criteria?.propertyType) filters.push(`Property type: ${form.criteria.propertyType}`);
+      if (form.preferredPropertyType) filters.push(`Preferred type: ${form.preferredPropertyType}`);
+
+      if (filters.length > 0) {
+        prompt += ` FILTERS: ${filters.join(', ')}.`;
+      }
+
+      // Add analysis scope preferences
+      const scopeEnabled = Object.entries(form.analysisScope)
+        .filter(([, enabled]) => enabled)
+        .map(([key]) => key);
+      if (scopeEnabled.length > 0) {
+        prompt += ` FOCUS ON: ${scopeEnabled.join(', ')}.`;
+      }
+
+      // Add strategy notes last
+      if (form.strategy) {
+        prompt += ` NOTES: ${form.strategy}`;
+      }
+
+      console.log('[ProjectCreate] Invoking agent:', { projectId, prompt });
+
+      // Simulate progress updates while agent processes (takes 10-20 min)
+      const progressInterval = setInterval(() => {
+        setAnalysisProgress(prev => Math.min(95, prev + 5)); // Max 95% until complete
+      }, 30000); // Update every 30 seconds
+
+      try {
+        // Call AWS multi-agent system (this will take 10-20 minutes)
+        const agentResponse = await analyzeWithAgent(prompt, projectId, undefined, (status) => {
+          setAnalysisStatus(status);
+        });
+
+        clearInterval(progressInterval);
+        setAnalysisProgress(100);
+        setAnalysisStatus('Processing results...');
+
+        if (!agentResponse.success) {
+          throw new Error(agentResponse.error || 'Agent analysis failed');
+        }
+
+        // Transform agent response to dashboard state
+        const dashboardState = transformAgentResponseToDashboard(agentResponse, form, projectId);
+
+        // Store dashboard state in sessionStorage for immediate display
+        sessionStorage.setItem(`dominion/dashboard/${projectId}`, JSON.stringify({
+          version: 1,
+          savedAt: Date.now(),
+          state: dashboardState,
+        }));
+
+        setHasChanges(false);
+        navigate(`/dashboard?projectId=${projectId}`);
+      } catch (err) {
+        clearInterval(progressInterval);
+        throw err;
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create project.');
+      console.error('[ProjectCreate] Error:', err);
+      setError(err instanceof Error ? err.message : 'Unable to analyze project. Please try again.');
     } finally {
       setSubmitting(false);
+      setAnalysisProgress(0);
+      setAnalysisStatus('Initializing...');
     }
   };
 
@@ -515,6 +595,21 @@ export const ProjectCreate = () => {
       goToStage(currentStageIndex - 1);
     }
   };
+
+  // Show loading screen while agent is processing
+  if (submitting) {
+    return (
+      <LoadingScreen
+        title="Multi-Agent Analysis"
+        subtitle="AWS Bedrock AgentCore"
+        status={analysisStatus}
+        detail={`Analyzing ${form.market} real estate opportunities · ${form.type.replace(/_/g, ' ')}`}
+        progress={analysisProgress}
+        progressCaption={`Session: ${form.name.substring(0, 30)}...`}
+        accentLabel="Dominion Intelligence"
+      />
+    );
+  }
 
   return (
     <div className="project-create">

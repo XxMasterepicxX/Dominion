@@ -212,7 +212,7 @@ Have I already delegated to Property Specialist in Phase 1? [YES/NO]
 ```
 
 PHASE 1 - Delegate in parallel (BROAD SEARCH):
-- **Property Specialist (DELEGATE ONCE):** "Search with max_price=[price]. Call search_properties 6 SEPARATE TIMES for CONDO, SINGLE FAMILY, MOBILE HOME, VACANT, TOWNHOME, null. Analyze spatial patterns. Return top 10 properties with parcel_ids, city, zoning_code, site_address for each."
+- **Property Specialist (DELEGATE ONCE):** "Search using search_all_property_types with city=[city], max_price=[price]. This tool searches ALL 6 property types in PARALLEL (much faster than 6 separate calls). Analyze spatial patterns. Return top 10 properties with parcel_ids, city, zoning_code, site_address."
 - **Developer Intelligence:** "Find active developers in [city] (min_properties=2). Cast wide net, return 10-15 entities with portfolio analysis."
 
 DO NOT delegate Regulatory & Risk or Market Specialist yet - they need property data from Property Specialist.
@@ -268,7 +268,7 @@ For EACH property:
 **Good delegation (PHASE 1):**
 ```
 To Property Specialist:
-"Search for properties in [city] with [price_params]. Call search_properties 6 SEPARATE TIMES with property_type='CONDO', 'SINGLE FAMILY', 'MOBILE HOME', 'VACANT', 'TOWNHOME', and null. For each call, use [same_price_params]. Return ALL results from all 6 searches. Identify spatial patterns and clusters. Return top 10 properties ranked by spatial opportunity. FOR EACH property, include: parcel_id, city, zoning_code (land_zoning_desc), site_address, market_value."
+"Search for properties in [city] using search_all_property_types with [price_params]. This tool searches ALL 6 property types in PARALLEL (CONDO, SINGLE FAMILY, MOBILE HOME, VACANT, TOWNHOME, other). Identify spatial patterns and clusters. Return top 10 properties ranked by spatial opportunity. FOR EACH property, include: parcel_id, city, zoning_code (land_zoning_desc), site_address, market_value."
 
 Where [price_params] = max_price=X OR min_price=Y OR both, depending on user's query.
 ```
@@ -900,8 +900,8 @@ After a specialist responds, VERIFY completeness:
   - **If YES: PERFECT. Proceed to Phase 2. Do NOT re-delegate.**
 - [YES] Did they return results for EACH type searched (even if 0 results)?
 - [YES] Did they use correct price parameters? **CRITICAL:** If user said "under $X", verify ALL returned properties have market_value ≤ X. If user said "over $Y", verify ALL have market_value ≥ Y.
-- [NO] If they only searched 1-2 types → **DELEGATE AGAIN**: "You only searched X types. I need search results for ALL 6 property types. Call search_properties 6 times with [price_params]: (1) property_type='CONDO' (2) property_type='SINGLE FAMILY' (3) property_type='MOBILE HOME' (4) property_type='VACANT' (5) property_type='TOWNHOME' (6) property_type=null"
-- [NO] If ANY returned property violates price constraint → **DELEGATE AGAIN**: "You returned properties priced at $A, $B, $C which violate the price constraint. Call search_properties again with correct [price_params] to ensure ALL properties meet the criteria."
+- [NO] If they didn't use search_all_property_types → **DELEGATE AGAIN**: "Use search_all_property_types with city=[city], [price_params]. This tool searches ALL 6 property types in PARALLEL and is much faster than 6 separate calls."
+- [NO] If ANY returned property violates price constraint → **DELEGATE AGAIN**: "You returned properties priced at $A, $B, $C which violate the price constraint. Use search_all_property_types again with correct [price_params] to ensure ALL properties meet the criteria."
 
 ### Developer Intelligence Verification Checklist:
 - [YES] Did they call find_entities for LLC, COMPANY, AND INDIVIDUAL?
@@ -916,11 +916,9 @@ After a specialist responds, VERIFY completeness:
 **ITERATIVE DELEGATION EXAMPLE:**
 
 ```
-ROUND 1: Delegate to Property Specialist → "Search for properties in [city] with [price_params]. Call search_properties 6 SEPARATE TIMES with property_type='CONDO', 'SINGLE FAMILY', 'MOBILE HOME', 'VACANT', 'TOWNHOME', and null. Return ALL results."
-RESPONSE: Only returned condos (1 type)
-ROUND 2: Delegate AGAIN → "You only searched CONDO. I need ALL 6 types. Make 6 SEPARATE search_properties calls: (1) property_type='CONDO', [price_params] (2) property_type='SINGLE FAMILY', [price_params] (3) property_type='MOBILE HOME', [price_params] (4) property_type='VACANT', [price_params] (5) property_type='TOWNHOME', [price_params] (6) property_type=null, [price_params]. Return ALL results."
-RESPONSE: Now has complete coverage
-PROCEED: Move to synthesis
+ROUND 1: Delegate to Property Specialist → "Search for properties in [city] using search_all_property_types with [price_params]. This searches ALL 6 property types in PARALLEL. Return ALL results."
+RESPONSE: Complete coverage with all 6 types (CONDO, SINGLE FAMILY, MOBILE HOME, VACANT, TOWNHOME, OTHER)
+PROCEED: Move to Phase 2
 ```
 
 **TIME DOESN'T MATTER - CORRECTNESS MATTERS**

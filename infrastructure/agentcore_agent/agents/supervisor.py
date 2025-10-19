@@ -7,6 +7,7 @@ Coordinates 4 specialist agents: Property, Market, Developer Intelligence, Regul
 import json
 import os
 import uuid
+import re
 from strands import Agent, tool
 import structlog
 
@@ -37,6 +38,9 @@ SYSTEM_PROMPT = load_prompt()
 # These need to be defined before creating the agent, but they'll use session_id from closure
 _current_session_id = None
 
+# Capture specialist responses for structured data extraction
+_specialist_responses = {}
+
 @tool
 def delegate_to_property_specialist(task: str) -> str:
     """
@@ -61,6 +65,8 @@ def delegate_to_property_specialist(task: str) -> str:
     logger.info("Supervisor delegating to Property Specialist", task=task, session_id=_current_session_id)
     try:
         result = property_specialist.invoke(task, session_id=_current_session_id)
+        # Store for structured data extraction
+        _specialist_responses['property'] = result
         logger.info("Property Specialist completed task", session_id=_current_session_id)
         return result
     except Exception as e:
@@ -123,6 +129,8 @@ def delegate_to_developer_intelligence(task: str) -> str:
     logger.info("Supervisor delegating to Developer Intelligence", task=task, session_id=_current_session_id)
     try:
         result = developer_intelligence.invoke(task, session_id=_current_session_id)
+        # Store for structured data extraction
+        _specialist_responses['developer'] = result
         logger.info("Developer Intelligence completed task", session_id=_current_session_id)
         return result
     except Exception as e:
@@ -183,7 +191,7 @@ supervisor_model = BedrockModel(
 )
 
 
-def invoke(user_query: str, session_id: str = None) -> str:
+def invoke(user_query: str, session_id: str = None):
     """
     Invoke the Supervisor agent with a user query.
 
@@ -202,14 +210,15 @@ def invoke(user_query: str, session_id: str = None) -> str:
         session_id: Unique session ID for isolation (generated if None)
 
     Returns:
-        Institutional-grade analysis with recommendation, confidence, and full cross-verification
+        Dict with 'message' (text analysis) and 'structured_data' (properties, developers, etc.)
     """
-    global _current_session_id
+    global _current_session_id, _specialist_responses
 
     if session_id is None:
         session_id = str(uuid.uuid4())
 
     _current_session_id = session_id
+    _specialist_responses = {}  # Reset for this session
     logger.info("Supervisor invoked with user query", query=user_query, session_id=session_id)
 
     try:
@@ -231,10 +240,67 @@ def invoke(user_query: str, session_id: str = None) -> str:
                    session_id=session_id,
                    tool_calls=len(result.tool_calls) if hasattr(result, 'tool_calls') else 0)
 
-        return result.message if hasattr(result, 'message') else str(result)
+        message = result.message if hasattr(result, 'message') else str(result)
+
+        # Extract structured data from specialist responses
+        structured_data = extract_structured_data(_specialist_responses)
+
+        return {
+            'message': message,
+            'structured_data': structured_data
+        }
 
     except Exception as e:
         logger.error("Supervisor error", error=str(e), session_id=session_id, exc_info=True)
-        return f"ERROR: Supervisor failed - {str(e)}"
+        return {
+            'message': f"ERROR: Supervisor failed - {str(e)}",
+            'structured_data': {}
+        }
     finally:
         _current_session_id = None
+        _specialist_responses = {}
+
+
+def extract_structured_data(specialist_responses: dict) -> dict:
+    """
+    Parse specialist text responses to extract structured property and developer data.
+    This enables the frontend to show real coordinates on the globe.
+    """
+    structured = {
+        'properties': [],
+        'developers': [],
+        'recommendation': 'UNKNOWN',
+        'confidence': 0.5
+    }
+
+    try:
+        # Extract properties from Property Specialist response
+        if 'property' in specialist_responses:
+            prop_text = specialist_responses['property']
+            # Look for property data in format: "parcel_id: XXX, address: YYY, lat: ZZ.ZZ, lon: -ZZ.ZZ"
+            # This is a simple regex parser - specialist would need to output in this format
+            property_pattern = r'parcel[_\s]?id[:\s]+([^,\n]+)[,\s]*address[:\s]+([^,\n]+)[,\s]*(?:lat|latitude)[:\s]+([\d\.\-]+)[,\s]*(?:lon|longitude)[:\s]+([\d\.\-]+)'
+            matches = re.findall(property_pattern, prop_text, re.IGNORECASE)
+            for match in matches[:10]:  # Limit to top 10
+                structured['properties'].append({
+                    'parcel_id': match[0].strip(),
+                    'address': match[1].strip(),
+                    'latitude': float(match[2]),
+                    'longitude': float(match[3])
+                })
+
+        # Extract developers from Developer Intelligence response
+        if 'developer' in specialist_responses:
+            dev_text = specialist_responses['developer']
+            # Look for developer names
+            dev_pattern = r'(?:developer|entity)[:\s]+([A-Z][A-Z\s\&\.]+(?:LLC|INC|CORP)?)'
+            matches = re.findall(dev_pattern, dev_text)
+            for match in matches[:5]:  # Limit to top 5
+                structured['developers'].append({
+                    'name': match.strip()
+                })
+
+    except Exception as e:
+        logger.warning("Could not extract structured data", error=str(e))
+
+    return structured

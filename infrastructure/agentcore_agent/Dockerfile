@@ -1,29 +1,19 @@
 # Dockerfile for Dominion Multi-Agent System
 # Supervisor + 4 Specialist Agents with AgentCore Runtime
 
-# Use Python slim base image (NOT Lambda base)
-# Platform specified in .bedrock_agentcore.yaml (linux/arm64)
-FROM python:3.12-slim
-
-# Set working directory
-WORKDIR /app
+# Use AWS Lambda Python base image for ARM64
+FROM public.ecr.aws/lambda/python:3.12-arm64
 
 # Copy requirements
-COPY requirements.txt .
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
-# Copy multi-agent system
-COPY dominion_multiagent.py .
-COPY agents/ ./agents/
-COPY prompts/ ./prompts/
+# Copy multi-agent system to Lambda task root
+COPY dominion_multiagent.py ${LAMBDA_TASK_ROOT}/
+COPY agents/ ${LAMBDA_TASK_ROOT}/agents/
+COPY prompts/ ${LAMBDA_TASK_ROOT}/prompts/
 
-# Set environment variables (will be overridden by AgentCore)
-ENV PYTHONUNBUFFERED=1
-
-# Expose port 8080 for AgentCore HTTP server
-EXPOSE 8080
-
-# Run multi-agent entry point - BedrockAgentCoreApp starts HTTP server automatically
-CMD ["python", "dominion_multiagent.py"]
+# Set Lambda handler - BedrockAgentCoreApp provides Lambda handler
+CMD ["dominion_multiagent.lambda_handler"]

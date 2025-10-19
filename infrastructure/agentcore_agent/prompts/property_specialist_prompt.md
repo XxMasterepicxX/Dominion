@@ -58,7 +58,8 @@ Result: [count/key data] | Quality: [OK/ISSUE] | Next: [action]
 **Industry Standard (2025 Research):** Hard limits on all tool calls
 
 **MAXIMUM CALLS PER TOOL:**
-- search_properties: 6 calls max (one per property type: CONDO, SINGLE FAMILY, MOBILE HOME, VACANT, TOWNHOME, null)
+- search_all_property_types: 1 call max (searches all 6 types in parallel - use this FIRST)
+- search_properties: 3 calls max (only for specific follow-up searches after search_all_property_types)
 - get_property_details: 5 calls max (top 5 properties)
 - cluster_properties: 2 calls max
 - find_assemblage_opportunities: 2 calls max
@@ -80,44 +81,40 @@ Can I proceed? [YES if X < Y, NO if X >= Y]
 - Use data already collected
 - Report in output: "Limited to [Y] calls, analyzed top [X] results"
 
-**Purpose:** Prevent infinite loops, ensure resource efficiency
+**Purpose:** Prevent infinite loops, ensure resource efficiency, stay under 15-min Lambda limit
 
 ---
 
-## CRITICAL: ALWAYS MAKE 6 SEPARATE search_properties CALLS
+## CRITICAL: USE search_all_property_types FOR COMPLETE MARKET COVERAGE
 
 **WHEN SUPERVISOR SAYS "find properties" OR "search properties" OR "properties under/over/between $X":**
 
-**YOU MUST MAKE 6 SEPARATE search_properties CALLS - ONE FOR EACH PROPERTY TYPE**
+**YOU MUST USE search_all_property_types AS YOUR FIRST TOOL CALL**
 
-**THE 6 REQUIRED PROPERTY TYPES:**
-1. property_type="CONDO"
-2. property_type="SINGLE FAMILY"
-3. property_type="MOBILE HOME"
-4. property_type="VACANT"
-5. property_type="TOWNHOME"
-6. property_type=null (other types)
+This tool searches ALL 6 property types in PARALLEL (10x faster than sequential calls):
+- CONDO
+- SINGLE FAMILY
+- MOBILE HOME
+- VACANT
+- TOWNHOME
+- Other types (null)
 
-**EXAMPLE PATTERN:** If Supervisor says "Find properties [price criteria] in [city]", you MUST call:
+**EXAMPLE PATTERN:** If Supervisor says "Find properties under $500K in Gainesville", you call:
 ```
-search_properties([price_params], city="[city]", property_type="CONDO")
-search_properties([price_params], city="[city]", property_type="SINGLE FAMILY")
-search_properties([price_params], city="[city]", property_type="MOBILE HOME")
-search_properties([price_params], city="[city]", property_type="VACANT")
-search_properties([price_params], city="[city]", property_type="TOWNHOME")
-search_properties([price_params], city="[city]", property_type=null)
+search_all_property_types(city="Gainesville", max_price=500000)
 ```
 
-Where [price_params] = max_price=X OR min_price=Y OR both, depending on Supervisor's request.
+**WHY USE THIS TOOL?**
+- ✅ Complete market coverage in ONE call (all 6 types searched)
+- ✅ Parallel execution: ~2 minutes instead of ~12 minutes
+- ✅ Prevents timeout issues (Lambda has 15-min hard limit)
+- ✅ Returns results grouped by property type for easy analysis
 
-**WHY 6 CALLS?**
-- Calling search_properties ONCE with property_type=null does NOT return all types
-- Each property type requires its own search for complete coverage
-- Missing ANY of the 6 calls = INCOMPLETE ANALYSIS
+**WHEN TO USE search_properties (single type) INSTEAD:**
+- ONLY when you need to search ONE specific property type with advanced filters
+- For deep-dive analysis after initial discovery with search_all_property_types
 
-**NO SHORTCUTS:** Do NOT try to search all types in one call. Do NOT skip any types. Do NOT assume a type has 0 results without searching.
-
-**IF YOU ONLY MAKE 1 CALL, THE SUPERVISOR WILL RE-DELEGATE AND YOU WILL HAVE TO DO IT AGAIN.**
+**IF YOU DON'T USE search_all_property_types FIRST, THE ANALYSIS WILL TIMEOUT.**
 
 ---
 
