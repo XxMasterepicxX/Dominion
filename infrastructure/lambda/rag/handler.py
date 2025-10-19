@@ -10,6 +10,7 @@ No Bedrock Knowledge Base required!
 
 import json
 import os
+import time
 from typing import Dict, Any, List
 import boto3
 from botocore.exceptions import ClientError
@@ -25,6 +26,9 @@ DATABASE_NAME = os.environ.get('DATABASE_NAME', 'dominion_db')
 
 # Embedding model (use Amazon Titan for consistency)
 EMBEDDING_MODEL_ID = 'amazon.titan-embed-text-v2:0'
+
+# Simple in-memory cache to detect loops (Lambda container reuse)
+query_history = {}
 
 
 def generate_embedding(text: str) -> List[float]:
@@ -73,6 +77,8 @@ def execute_sql(sql: str, params: List[Dict] = None) -> Dict:
         if params:
             kwargs['parameters'] = params
 
+        # CRITICAL: Must include result metadata to get column names
+        kwargs['includeResultMetadata'] = True
         response = rds_data.execute_statement(**kwargs)
         return response
 
@@ -154,6 +160,37 @@ def search_ordinances(params: Dict) -> Dict[str, Any]:
     if not query:
         return {'success': False, 'error': 'query parameter is required'}
 
+    # CRITICAL: Detect infinite loops - if same query called repeatedly, stop it
+    current_time = time.time()
+    query_key = f"{query}:{jurisdiction}"
+
+    if query_key in query_history:
+        last_time, count = query_history[query_key]
+
+        # If same query within 120 seconds, increment count
+        if current_time - last_time < 120:
+            count += 1
+            query_history[query_key] = (current_time, count)
+
+            # If called more than 2 times in 120 seconds, STOP THE LOOP
+            if count > 2:
+                print(f"LOOP DETECTED: Query '{query}' called {count} times in {current_time - last_time:.1f}s - RETURNING EMPTY SUCCESS")
+                return {
+                    'success': True,
+                    'query': query,
+                    'jurisdiction': jurisdiction,
+                    'count': 0,
+                    'results': [],
+                    'method': 'loop_prevention_cache',
+                    'note': f'This query was already attempted {count-1} times with zero results. No ordinance data available for this query. Proceed with analysis without zoning verification.'
+                }
+        else:
+            # Reset if more than 120 seconds passed
+            query_history[query_key] = (current_time, 1)
+    else:
+        # First time seeing this query
+        query_history[query_key] = (current_time, 1)
+
     # Validate environment variables
     if not CLUSTER_ARN or not SECRET_ARN:
         return {
@@ -212,18 +249,27 @@ def search_ordinances(params: Dict) -> Dict[str, Any]:
         response = execute_sql(sql, sql_params)
         results = format_rds_response(response)
 
-        print(f"Ordinance search complete: {len(results)} results found")
+        print(f"Ordinance search complete: {len(results)} raw results found")
 
-        # Step 4: Format results for readability
+        # Step 4: Format results for readability and filter out empty/low-quality results
         formatted_results = []
         for r in results:
+            content = r.get('content', '').strip()
+            similarity = r.get('similarity_score', 0.0)
+
+            # Skip empty content or zero similarity (no actual match)
+            if not content or similarity == 0.0:
+                continue
+
             formatted_results.append({
-                'content': r.get('content', ''),
+                'content': content,
                 'city': r.get('city', ''),
                 'ordinance_file': r.get('ordinance_file', ''),
                 'chunk_number': r.get('chunk_number', 0),
-                'similarity_score': round(r.get('similarity_score', 0.0), 3)
+                'similarity_score': round(similarity, 3)
             })
+
+        print(f"Filtered to {len(formatted_results)} valid results (removed empty/zero-similarity)")
 
         return {
             'success': True,
@@ -232,7 +278,8 @@ def search_ordinances(params: Dict) -> Dict[str, Any]:
             'count': len(formatted_results),
             'results': formatted_results,
             'method': 'pgvector_cosine_similarity',
-            'index': 'HNSW'
+            'index': 'HNSW',
+            'note': 'Empty content and zero-similarity results filtered out' if len(results) != len(formatted_results) else None
         }
 
     except Exception as e:

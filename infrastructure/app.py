@@ -15,6 +15,7 @@ from aws_cdk import App, Environment, Tags
 
 from lib.dominion_aurora_stack import DominionAuroraStack
 from lib.dominion_lambda_stack import DominionLambdaStack
+from lib.dominion_agentcore_stack import DominionAgentCoreStack
 # from lib.dominion_kb_stack import DominionKnowledgeBaseStack  # REMOVED: Using custom RAG instead
 # from lib.dominion_scraper_stack import DominionScraperStack  # TODO: Add after fixing Patchright/Crawl4AI
 
@@ -36,7 +37,7 @@ aurora_stack = DominionAuroraStack(
 )
 
 # Stack 2: Lambda Functions (Intelligence Tools + Custom RAG)
-# 3 consolidated functions: Intelligence (7 tools), RAG (1 tool), Enrichment (2 tools)
+# 3 consolidated functions: Intelligence (9 tools), RAG (1 tool), Enrichment (2 tools)
 # RAG Lambda implements custom vector search on Aurora pgvector
 lambda_stack = DominionLambdaStack(
     app,
@@ -46,8 +47,19 @@ lambda_stack = DominionLambdaStack(
     description="Lambda functions for Dominion intelligence tools with custom RAG",
 )
 
+# Stack 3: AgentCore Multi-Agent System
+# Supervisor + 4 Specialists using Bedrock AgentCore
+# Loads prompts from markdown files (no hardcoding)
+agentcore_stack = DominionAgentCoreStack(
+    app,
+    "Dominion-AgentCore",
+    lambda_stack=lambda_stack,  # Pass Lambda stack for tool access
+    env=env,
+    description="Multi-agent system: Supervisor (Nova Premier) + 4 Specialists (Nova Lite)",
+)
+
 # Add common tags for hackathon tracking and AWS Application grouping
-for stack in [aurora_stack, lambda_stack]:
+for stack in [aurora_stack, lambda_stack, agentcore_stack]:
     # AWS Application tag (groups resources in AWS Console)
     Tags.of(stack).add("awsApplication", "arn:aws:resource-groups:us-east-1:872041712923:group/Dominion/04ipu3hc6wg3jebw9lzqs2qrf1")
     # Project tags

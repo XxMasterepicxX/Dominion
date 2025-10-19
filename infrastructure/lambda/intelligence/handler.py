@@ -2,15 +2,15 @@
 Intelligence Lambda Function Handler
 
 Handles 9 tools:
-1. search_properties - Search properties by criteria
-2. find_entities - Find property owners/entities
-3. analyze_market_trends - Market analysis
+1. search_properties - Search properties by criteria (enhanced with 40+ filters)
+2. find_entities - Find property owners/entities (uses entities table)
+3. analyze_market_trends - Market analysis with absorption rates
 4. cluster_properties - Geographic clustering
-5. find_assemblage_opportunities - Multi-parcel assemblage
+5. find_assemblage_opportunities - Multi-parcel assemblage detection
 6. analyze_location_intelligence - Location-based analysis
-7. check_permit_history - Permit history lookup
+7. check_permit_history - Permit history lookup (joins permits + entities)
 8. find_comparable_properties - Find comps (actual sale prices)
-9. identify_investment_opportunities - Deal finding with clear criteria
+9. get_property_details - Get ALL property data (80+ fields)
 
 Uses RDS Data API for serverless database access (no VPC needed).
 Self-contained - no external module dependencies.
@@ -73,6 +73,17 @@ def format_rds_response(response: Dict) -> List[Dict]:
                     row[col_name] = value_dict['doubleValue']
                 elif 'booleanValue' in value_dict:
                     row[col_name] = value_dict['booleanValue']
+                elif 'arrayValue' in value_dict:
+                    # Handle arrays (ARRAY_AGG returns arrayValue)
+                    array_val = value_dict['arrayValue']
+                    if 'stringValues' in array_val:
+                        row[col_name] = array_val['stringValues']
+                    elif 'longValues' in array_val:
+                        row[col_name] = array_val['longValues']
+                    elif 'doubleValues' in array_val:
+                        row[col_name] = array_val['doubleValues']
+                    else:
+                        row[col_name] = []
                 elif 'isNull' in value_dict and value_dict['isNull']:
                     row[col_name] = None
                 else:
@@ -88,25 +99,137 @@ def format_rds_response(response: Dict) -> List[Dict]:
 
 def search_properties(params: Dict) -> Dict:
     """
-    Search properties by criteria.
+    Search properties by criteria with COMPREHENSIVE FILTERS.
+
+    Now uses 40+ database fields for precise filtering.
 
     Parameters:
-    - city: str (optional)
-    - property_type: str (optional)
-    - min_price: float (optional)
-    - max_price: float (optional)
+    -- Location & Basic
+    - city: str
+    - property_type: str
+    - neighborhood_desc: str (neighborhood name)
+    - subdivision_desc: str (subdivision name)
+
+    -- Price & Value
+    - min_price: float (market_value)
+    - max_price: float (market_value)
+    - min_assessed: float (assessed_value)
+    - max_assessed: float (assessed_value)
+
+    -- Physical
+    - min_sqft: int (square_feet)
+    - max_sqft: int (square_feet)
+    - min_lot_acres: float
+    - max_lot_acres: float
+    - bedrooms: int (exact match)
+    - min_bedrooms: int
+    - bathrooms: float (exact match)
+    - min_bathrooms: float
+    - min_year_built: int
+    - max_year_built: int
+    - min_stories: int
+    - max_stories: int
+
+    -- Building Features (boolean filters)
+    - has_pool: bool
+    - has_garage: bool
+    - has_porch: bool
+    - has_fence: bool
+    - has_shed: bool
+
+    -- Building Quality
+    - building_condition: str (e.g., "Good", "Fair", "Excellent")
+    - building_quality: str
+    - roof_type: str
+    - heat_type: str
+    - ac_type: str
+
+    -- Owner Intelligence
+    - owner_state: str (e.g., "FL" for in-state, "!FL" for out-of-state)
+    - owner_name: str (partial match)
+
+    -- Tax & Exemptions
+    - has_homestead: bool (checks exemption_types)
+    - exemption_types: str (partial match on exemption_types_list)
+
+    -- Sale History
+    - min_last_sale_price: float
+    - max_last_sale_price: float
+    - min_last_sale_date: str (YYYY-MM-DD)
+    - max_last_sale_date: str (YYYY-MM-DD)
+    - sale_qualified: str (e.g., "Q" for qualified)
+
+    -- Other
     - limit: int (default: 20)
+    - order_by: str (default: "market_value", options: "market_value", "last_sale_date", "year_built", "lot_size_acres")
     """
+    # Extract all parameters
     city = params.get('city')
     property_type = params.get('property_type')
+    neighborhood_desc = params.get('neighborhood_desc')
+    subdivision_desc = params.get('subdivision_desc')
+
     min_price = params.get('min_price')
     max_price = params.get('max_price')
+    min_assessed = params.get('min_assessed')
+    max_assessed = params.get('max_assessed')
+
+    min_sqft = params.get('min_sqft')
+    max_sqft = params.get('max_sqft')
+    min_lot_acres = params.get('min_lot_acres')
+    max_lot_acres = params.get('max_lot_acres')
+
+    bedrooms = params.get('bedrooms')
+    min_bedrooms = params.get('min_bedrooms')
+    bathrooms = params.get('bathrooms')
+    min_bathrooms = params.get('min_bathrooms')
+
+    min_year_built = params.get('min_year_built')
+    max_year_built = params.get('max_year_built')
+    min_stories = params.get('min_stories')
+    max_stories = params.get('max_stories')
+
+    has_pool = params.get('has_pool')
+    has_garage = params.get('has_garage')
+    has_porch = params.get('has_porch')
+    has_fence = params.get('has_fence')
+    has_shed = params.get('has_shed')
+
+    building_condition = params.get('building_condition')
+    building_quality = params.get('building_quality')
+    roof_type = params.get('roof_type')
+    heat_type = params.get('heat_type')
+    ac_type = params.get('ac_type')
+
+    owner_state = params.get('owner_state')
+    owner_name = params.get('owner_name')
+
+    has_homestead = params.get('has_homestead')
+    exemption_types = params.get('exemption_types')
+
+    min_last_sale_price = params.get('min_last_sale_price')
+    max_last_sale_price = params.get('max_last_sale_price')
+    min_last_sale_date = params.get('min_last_sale_date')
+    max_last_sale_date = params.get('max_last_sale_date')
+    sale_qualified = params.get('sale_qualified')
+
     limit = params.get('limit', 20)
+    order_by = params.get('order_by', 'market_value')
 
     # Build dynamic WHERE clause
     where_clauses = []
     sql_params = []
 
+    # CRITICAL: Validate city parameter (Issue #1 fix)
+    if city and city.strip() in ['', '~/', 'null', 'undefined', '*']:
+        return {
+            'success': False,
+            'error': 'Invalid city parameter',
+            'message': 'city must be a valid city name (e.g., "Gainesville"), not a wildcard or empty string',
+            'received': city
+        }
+
+    # Location filters
     if city:
         where_clauses.append("UPPER(city) = UPPER(:city)")
         sql_params.append({'name': 'city', 'value': {'stringValue': city}})
@@ -115,28 +238,202 @@ def search_properties(params: Dict) -> Dict:
         where_clauses.append("UPPER(property_type) = UPPER(:property_type)")
         sql_params.append({'name': 'property_type', 'value': {'stringValue': property_type}})
 
+    if neighborhood_desc:
+        where_clauses.append("UPPER(neighborhood_desc) LIKE UPPER(:neighborhood)")
+        sql_params.append({'name': 'neighborhood', 'value': {'stringValue': f'%{neighborhood_desc}%'}})
+
+    if subdivision_desc:
+        where_clauses.append("UPPER(subdivision_desc) LIKE UPPER(:subdivision)")
+        sql_params.append({'name': 'subdivision', 'value': {'stringValue': f'%{subdivision_desc}%'}})
+
+    # Price filters (Issue #3 fix: ensure numeric comparison and NULL handling)
     if min_price is not None:
-        where_clauses.append("market_value >= :min_price")
+        where_clauses.append("market_value >= :min_price AND market_value IS NOT NULL")
         sql_params.append({'name': 'min_price', 'value': {'doubleValue': float(min_price)}})
 
     if max_price is not None:
-        where_clauses.append("market_value <= :max_price")
+        where_clauses.append("market_value <= :max_price AND market_value IS NOT NULL")
         sql_params.append({'name': 'max_price', 'value': {'doubleValue': float(max_price)}})
 
-    # Construct SQL
+    if min_assessed is not None:
+        where_clauses.append("assessed_value >= :min_assessed AND assessed_value IS NOT NULL")
+        sql_params.append({'name': 'min_assessed', 'value': {'doubleValue': float(min_assessed)}})
+
+    if max_assessed is not None:
+        where_clauses.append("assessed_value <= :max_assessed AND assessed_value IS NOT NULL")
+        sql_params.append({'name': 'max_assessed', 'value': {'doubleValue': float(max_assessed)}})
+
+    # Physical filters
+    if min_sqft is not None:
+        where_clauses.append("square_feet >= :min_sqft")
+        sql_params.append({'name': 'min_sqft', 'value': {'longValue': int(min_sqft)}})
+
+    if max_sqft is not None:
+        where_clauses.append("square_feet <= :max_sqft")
+        sql_params.append({'name': 'max_sqft', 'value': {'longValue': int(max_sqft)}})
+
+    if min_lot_acres is not None:
+        where_clauses.append("lot_size_acres >= :min_lot")
+        sql_params.append({'name': 'min_lot', 'value': {'doubleValue': float(min_lot_acres)}})
+
+    if max_lot_acres is not None:
+        where_clauses.append("lot_size_acres <= :max_lot")
+        sql_params.append({'name': 'max_lot', 'value': {'doubleValue': float(max_lot_acres)}})
+
+    if bedrooms is not None:
+        where_clauses.append("bedrooms = :bedrooms")
+        sql_params.append({'name': 'bedrooms', 'value': {'longValue': int(bedrooms)}})
+
+    if min_bedrooms is not None:
+        where_clauses.append("bedrooms >= :min_bedrooms")
+        sql_params.append({'name': 'min_bedrooms', 'value': {'longValue': int(min_bedrooms)}})
+
+    if bathrooms is not None:
+        where_clauses.append("bathrooms = :bathrooms")
+        sql_params.append({'name': 'bathrooms', 'value': {'doubleValue': float(bathrooms)}})
+
+    if min_bathrooms is not None:
+        where_clauses.append("bathrooms >= :min_bathrooms")
+        sql_params.append({'name': 'min_bathrooms', 'value': {'doubleValue': float(min_bathrooms)}})
+
+    if min_year_built is not None:
+        where_clauses.append("year_built >= :min_year")
+        sql_params.append({'name': 'min_year', 'value': {'longValue': int(min_year_built)}})
+
+    if max_year_built is not None:
+        where_clauses.append("year_built <= :max_year")
+        sql_params.append({'name': 'max_year', 'value': {'longValue': int(max_year_built)}})
+
+    if min_stories is not None:
+        where_clauses.append("stories >= :min_stories")
+        sql_params.append({'name': 'min_stories', 'value': {'longValue': int(min_stories)}})
+
+    if max_stories is not None:
+        where_clauses.append("stories <= :max_stories")
+        sql_params.append({'name': 'max_stories', 'value': {'longValue': int(max_stories)}})
+
+    # Building feature filters (booleans)
+    if has_pool is not None:
+        where_clauses.append("has_pool = :has_pool")
+        sql_params.append({'name': 'has_pool', 'value': {'booleanValue': bool(has_pool)}})
+
+    if has_garage is not None:
+        where_clauses.append("has_garage = :has_garage")
+        sql_params.append({'name': 'has_garage', 'value': {'booleanValue': bool(has_garage)}})
+
+    if has_porch is not None:
+        where_clauses.append("has_porch = :has_porch")
+        sql_params.append({'name': 'has_porch', 'value': {'booleanValue': bool(has_porch)}})
+
+    if has_fence is not None:
+        where_clauses.append("has_fence = :has_fence")
+        sql_params.append({'name': 'has_fence', 'value': {'booleanValue': bool(has_fence)}})
+
+    if has_shed is not None:
+        where_clauses.append("has_shed = :has_shed")
+        sql_params.append({'name': 'has_shed', 'value': {'booleanValue': bool(has_shed)}})
+
+    # Quality filters
+    if building_condition:
+        where_clauses.append("UPPER(building_condition) = UPPER(:condition)")
+        sql_params.append({'name': 'condition', 'value': {'stringValue': building_condition}})
+
+    if building_quality:
+        where_clauses.append("UPPER(building_quality) = UPPER(:quality)")
+        sql_params.append({'name': 'quality', 'value': {'stringValue': building_quality}})
+
+    if roof_type:
+        where_clauses.append("UPPER(roof_type) LIKE UPPER(:roof)")
+        sql_params.append({'name': 'roof', 'value': {'stringValue': f'%{roof_type}%'}})
+
+    if heat_type:
+        where_clauses.append("UPPER(heat_type) LIKE UPPER(:heat)")
+        sql_params.append({'name': 'heat', 'value': {'stringValue': f'%{heat_type}%'}})
+
+    if ac_type:
+        where_clauses.append("UPPER(ac_type) LIKE UPPER(:ac)")
+        sql_params.append({'name': 'ac', 'value': {'stringValue': f'%{ac_type}%'}})
+
+    # Owner filters
+    if owner_state:
+        if owner_state.startswith('!'):
+            # Exclude state (e.g., !FL = out-of-state)
+            state = owner_state[1:]
+            where_clauses.append("UPPER(owner_state) != UPPER(:owner_state)")
+            sql_params.append({'name': 'owner_state', 'value': {'stringValue': state}})
+        else:
+            where_clauses.append("UPPER(owner_state) = UPPER(:owner_state)")
+            sql_params.append({'name': 'owner_state', 'value': {'stringValue': owner_state}})
+
+    if owner_name:
+        where_clauses.append("UPPER(owner_name) LIKE UPPER(:owner_name)")
+        sql_params.append({'name': 'owner_name', 'value': {'stringValue': f'%{owner_name}%'}})
+
+    # Tax/Exemption filters
+    if has_homestead is not None:
+        if has_homestead:
+            where_clauses.append("exemption_types_list LIKE '%HOMESTEAD%'")
+        else:
+            where_clauses.append("(exemption_types_list NOT LIKE '%HOMESTEAD%' OR exemption_types_list IS NULL)")
+
+    if exemption_types:
+        where_clauses.append("UPPER(exemption_types_list) LIKE UPPER(:exemption)")
+        sql_params.append({'name': 'exemption', 'value': {'stringValue': f'%{exemption_types}%'}})
+
+    # Sale history filters (NULL-safe: properties without sales excluded when filtering by price)
+    if min_last_sale_price is not None:
+        where_clauses.append("last_sale_price >= :min_sale_price AND last_sale_price IS NOT NULL")
+        sql_params.append({'name': 'min_sale_price', 'value': {'doubleValue': float(min_last_sale_price)}})
+
+    if max_last_sale_price is not None:
+        where_clauses.append("last_sale_price <= :max_sale_price AND last_sale_price IS NOT NULL")
+        sql_params.append({'name': 'max_sale_price', 'value': {'doubleValue': float(max_last_sale_price)}})
+
+    if min_last_sale_date:
+        where_clauses.append("last_sale_date >= :min_sale_date::date")
+        sql_params.append({'name': 'min_sale_date', 'value': {'stringValue': min_last_sale_date}})
+
+    if max_last_sale_date:
+        where_clauses.append("last_sale_date <= :max_sale_date::date")
+        sql_params.append({'name': 'max_sale_date', 'value': {'stringValue': max_last_sale_date}})
+
+    if sale_qualified:
+        where_clauses.append("sale_qualified = :sale_qualified")
+        sql_params.append({'name': 'sale_qualified', 'value': {'stringValue': sale_qualified}})
+
+    # Construct SQL with expanded field list
     sql = """
         SELECT property_id, parcel_id, site_address as address, city,
                property_type, land_zoning_desc as zoning, land_use_desc as land_use,
                lot_size_acres as lot_size, square_feet as building_area,
-               year_built, bedrooms, bathrooms, assessed_value, market_value,
-               owner_name, latitude, longitude
+               year_built, bedrooms, bathrooms, stories,
+               assessed_value, market_value, taxable_value,
+               land_value, improvement_value,
+               owner_name, owner_state, owner_city,
+               latitude, longitude,
+               last_sale_date, last_sale_price, sale_qualified,
+               has_pool, has_garage, has_porch, has_fence, has_shed,
+               building_condition, building_quality,
+               neighborhood_desc, subdivision_desc,
+               exemption_types_list, total_exemption_amount
         FROM bulk_property_records
     """
+
+    # CRITICAL: Exclude properties with NULL or empty parcel_id (prevents get_property_details failures)
+    where_clauses.append("parcel_id IS NOT NULL AND TRIM(parcel_id) != ''")
 
     if where_clauses:
         sql += " WHERE " + " AND ".join(where_clauses)
 
-    sql += f" ORDER BY market_value DESC LIMIT {limit}"
+    # Order by
+    valid_orders = {
+        'market_value': 'market_value DESC NULLS LAST',
+        'last_sale_date': 'last_sale_date DESC NULLS LAST',
+        'year_built': 'year_built DESC NULLS LAST',
+        'lot_size_acres': 'lot_size_acres DESC NULLS LAST'
+    }
+    order_clause = valid_orders.get(order_by, 'market_value DESC NULLS LAST')
+    sql += f" ORDER BY {order_clause} LIMIT {limit}"
 
     response = execute_sql(sql, sql_params if sql_params else None)
     properties = format_rds_response(response)
@@ -144,7 +441,9 @@ def search_properties(params: Dict) -> Dict:
     return {
         'success': True,
         'count': len(properties),
-        'properties': properties
+        'properties': properties,
+        'filters_applied': len(where_clauses),
+        'note': 'Enhanced search with 40+ filter options including building features, neighborhood, owner location, and tax data'
     }
 
 
@@ -152,22 +451,38 @@ def find_entities(params: Dict) -> Dict:
     """
     Find property owners/entities with multiple properties (portfolio owners).
 
-    This is critical for:
-    - Institutional investors: Track competitor acquisitions
-    - Developers: Monitor institutional activity
-    - Wholesalers: Build buyer lists
+    NOW USES entities TABLE FOR ACCURATE DATA:
+    - Eliminates duplicates (523 unique entities vs 620 raw owner names)
+    - Includes entity_type (llc, corp, individual, government)
+    - Joins via canonical_name for better matching
+
+    This tool has TWO MODES:
+
+    MODE 1: DISCOVERY (no entity_name provided)
+    - Returns list of entities with property counts
+    - Used for: Finding all developers/investors in market
+
+    MODE 2: DEEP DIVE (entity_name provided)
+    - Returns full portfolio for specific entity
+    - Includes: all properties, acquisition timeline, type breakdown
+    - Used for: Portfolio analysis, strategic intent detection
 
     Parameters:
+    - entity_name: str (optional) - If provided, returns full portfolio for this entity
     - city: str (optional) - Filter by city
-    - min_properties: int (default: 2) - Minimum properties to qualify
+    - min_properties: int (default: 2) - Minimum properties to qualify (discovery mode)
     - property_type: str (optional) - Filter by property type
+    - entity_type: str (optional) - Filter by entity type (llc, corp, individual, government)
     - limit: int (default: 20)
 
-    Returns:
+    Returns (Discovery Mode):
         {
+            "mode": "discovery",
             "entities": [
                 {
                     "entity_name": str,
+                    "entity_type": str,  # NEW: llc, corp, individual, government
+                    "entity_id": str,    # NEW: UUID for deep dive queries
                     "property_count": int,
                     "total_portfolio_value": float,
                     "avg_property_value": float,
@@ -175,63 +490,237 @@ def find_entities(params: Dict) -> Dict:
                 }
             ]
         }
+
+    Returns (Deep Dive Mode):
+        {
+            "mode": "deep_dive",
+            "entity_name": str,
+            "entity_type": str,      # NEW
+            "entity_id": str,        # NEW
+            "property_count": int,
+            "total_value": float,
+            "avg_property_value": float,
+            "properties": [...],  # Full property list
+            "acquisition_timeline": {...},
+            "property_type_breakdown": {...},
+            "geographic_concentration": {...}
+        }
     """
+    entity_name = params.get('entity_name')
     city = params.get('city')
     min_properties = params.get('min_properties', 2)
     property_type = params.get('property_type')
+    entity_type_filter = params.get('entity_type')
     limit = params.get('limit', 20)
 
-    where_clauses = []
+    # Type coercion: handle float inputs for min_properties
+    try:
+        min_properties = int(float(min_properties))
+    except (ValueError, TypeError):
+        min_properties = 2
+
+    # =========================================================================
+    # MODE 2: DEEP DIVE - Get specific entity's full portfolio
+    # =========================================================================
+    if entity_name:
+        # First, find the entity in the entities table
+        sql_lookup = """
+            SELECT id, name, canonical_name, entity_type
+            FROM entities
+            WHERE UPPER(canonical_name) = UPPER(:entity_name)
+               OR UPPER(name) = UPPER(:entity_name)
+            LIMIT 1
+        """
+        lookup_params = [{'name': 'entity_name', 'value': {'stringValue': entity_name}}]
+
+        lookup_response = execute_sql(sql_lookup, lookup_params)
+        entity_records = format_rds_response(lookup_response)
+
+        if not entity_records:
+            return {
+                'success': False,
+                'error': f'Entity not found: {entity_name}',
+                'note': 'Check spelling or try discovery mode to find entity names',
+                'suggestion': 'Use find_entities without entity_name to see all available entities'
+            }
+
+        entity_record = entity_records[0]
+        entity_id = entity_record.get('id')
+        canonical_name = entity_record.get('canonical_name')
+        entity_type_val = entity_record.get('entity_type')
+
+        # Now get properties using canonical_name
+        where_clauses = ["UPPER(bp.owner_name) = UPPER(:canonical_name)", "bp.market_value > 0"]
+        sql_params = [{'name': 'canonical_name', 'value': {'stringValue': canonical_name}}]
+
+        if city:
+            where_clauses.append("UPPER(bp.city) = UPPER(:city)")
+            sql_params.append({'name': 'city', 'value': {'stringValue': city}})
+
+        if property_type:
+            where_clauses.append("bp.property_type = :property_type")
+            sql_params.append({'name': 'property_type', 'value': {'stringValue': property_type}})
+
+        where_clause = " WHERE " + " AND ".join(where_clauses)
+
+        sql = f"""
+            SELECT
+                bp.property_id,
+                bp.parcel_id,
+                bp.site_address as address,
+                bp.city,
+                bp.property_type,
+                bp.market_value,
+                bp.last_sale_date,
+                bp.last_sale_price,
+                bp.lot_size_acres,
+                bp.square_feet as building_area,
+                bp.year_built,
+                bp.bedrooms,
+                bp.bathrooms,
+                bp.latitude,
+                bp.longitude,
+                bp.land_zoning_desc as zoning
+            FROM bulk_property_records bp
+            {where_clause}
+            ORDER BY bp.last_sale_date DESC NULLS LAST
+        """
+
+        response = execute_sql(sql, sql_params)
+        properties = format_rds_response(response)
+
+        if not properties:
+            return {
+                'success': False,
+                'error': f'No properties found for entity: {entity_name}',
+                'note': 'Entity exists but has no properties matching your filters',
+                'entity_type': entity_type_val
+            }
+
+        # Calculate portfolio analytics
+        property_count = len(properties)
+        total_value = sum(float(p.get('market_value', 0) or 0) for p in properties)
+
+        # Property type breakdown
+        type_breakdown = {}
+        for p in properties:
+            ptype = p.get('property_type', 'UNKNOWN')
+            type_breakdown[ptype] = type_breakdown.get(ptype, 0) + 1
+
+        # Acquisition timeline analysis
+        acquisitions_by_year = {}
+        acquisitions_by_month = {}
+        first_acquisition = None
+        last_acquisition = None
+        properties_with_sale_dates = 0
+
+        for p in properties:
+            sale_date = p.get('last_sale_date')
+            if sale_date:
+                properties_with_sale_dates += 1
+                date_str = str(sale_date)
+
+                # Extract year and month
+                if len(date_str) >= 10:  # YYYY-MM-DD format
+                    year = date_str[:4]
+                    month = date_str[:7]  # YYYY-MM
+                    acquisitions_by_year[year] = acquisitions_by_year.get(year, 0) + 1
+                    acquisitions_by_month[month] = acquisitions_by_month.get(month, 0) + 1
+
+                    if not first_acquisition or sale_date < first_acquisition:
+                        first_acquisition = sale_date
+                    if not last_acquisition or sale_date > last_acquisition:
+                        last_acquisition = sale_date
+
+        # Geographic concentration
+        geo_concentration = {}
+        for p in properties:
+            city_name = p.get('city', 'UNKNOWN')
+            geo_concentration[city_name] = geo_concentration.get(city_name, 0) + 1
+
+        # Zoning concentration
+        zoning_concentration = {}
+        for p in properties:
+            zoning = p.get('zoning', 'UNKNOWN')
+            if zoning:
+                zoning_concentration[zoning] = zoning_concentration.get(zoning, 0) + 1
+
+        # Price range analysis
+        prices = [float(p.get('market_value', 0) or 0) for p in properties if p.get('market_value')]
+        min_price = min(prices) if prices else 0
+        max_price = max(prices) if prices else 0
+
+        return {
+            'success': True,
+            'mode': 'deep_dive',
+            'entity_id': entity_id,
+            'entity_name': entity_record.get('name'),
+            'canonical_name': canonical_name,
+            'entity_type': entity_type_val,
+            'property_count': property_count,
+            'total_value': total_value,
+            'avg_property_value': total_value / property_count if property_count > 0 else 0,
+            'min_property_value': min_price,
+            'max_property_value': max_price,
+            'properties': properties,  # FULL property list
+            'acquisition_timeline': {
+                'first_acquisition': str(first_acquisition) if first_acquisition else None,
+                'last_acquisition': str(last_acquisition) if last_acquisition else None,
+                'properties_with_dates': properties_with_sale_dates,
+                'acquisitions_by_year': dict(sorted(acquisitions_by_year.items())),
+                'acquisitions_by_month': dict(sorted(acquisitions_by_month.items())[-12:])  # Last 12 months
+            },
+            'property_type_breakdown': dict(sorted(type_breakdown.items(), key=lambda x: x[1], reverse=True)),
+            'geographic_concentration': dict(sorted(geo_concentration.items(), key=lambda x: x[1], reverse=True)),
+            'zoning_concentration': dict(sorted(zoning_concentration.items(), key=lambda x: x[1], reverse=True)),
+            'portfolio_pattern_summary': f"{property_count} properties, " +
+                                         f"${total_value:,.0f} total value, " +
+                                         f"dominant type: {max(type_breakdown, key=type_breakdown.get) if type_breakdown else 'N/A'}, " +
+                                         f"price range: ${min_price:,.0f}-${max_price:,.0f}"
+        }
+
+    # =========================================================================
+    # MODE 1: DISCOVERY - Find entities with multiple properties using entities table
+    # =========================================================================
+
+    # Build WHERE clause for property filtering
+    property_where = []
     sql_params = []
 
     if city:
-        where_clauses.append("UPPER(city) = UPPER(:city)")
+        property_where.append("UPPER(bp.city) = UPPER(:city)")
         sql_params.append({'name': 'city', 'value': {'stringValue': city}})
 
     if property_type:
-        where_clauses.append("property_type = :property_type")
+        property_where.append("bp.property_type = :property_type")
         sql_params.append({'name': 'property_type', 'value': {'stringValue': property_type}})
 
-    where_clause = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+    property_where_clause = " AND " + " AND ".join(property_where) if property_where else ""
 
-    # Find owners with multiple properties
+    # Entity type filter
+    entity_type_where = ""
+    if entity_type_filter:
+        entity_type_where = " AND LOWER(e.entity_type) = LOWER(:entity_type)"
+        sql_params.append({'name': 'entity_type', 'value': {'stringValue': entity_type_filter}})
+
+    # Use entities table for accurate, de-duplicated results
+    # OPTIMIZED: Simplified query for fast discovery
     sql = f"""
-        WITH owner_portfolios AS (
-            SELECT
-                owner_name,
-                COUNT(*) as property_count,
-                SUM(market_value) as total_portfolio_value,
-                AVG(market_value) as avg_property_value,
-                -- Get top 3 property types
-                (
-                    SELECT json_agg(json_build_object('type', property_type, 'count', type_count))
-                    FROM (
-                        SELECT property_type, COUNT(*) as type_count
-                        FROM bulk_property_records bp2
-                        WHERE bp2.owner_name = bp.owner_name
-                          {("AND UPPER(bp2.city) = UPPER(:city)" if city else "")}
-                        GROUP BY property_type
-                        ORDER BY type_count DESC
-                        LIMIT 3
-                    ) top_types
-                ) as property_types
-            FROM bulk_property_records bp
-            {where_clause}
-              AND owner_name IS NOT NULL
-              AND owner_name != 'UNKNOWN'
-              AND owner_name != ''
-              AND market_value > 0
-            GROUP BY owner_name
-            HAVING COUNT(*) >= :min_properties
-        )
         SELECT
-            owner_name as entity_name,
-            property_count,
-            total_portfolio_value,
-            avg_property_value,
-            property_types
-        FROM owner_portfolios
-        ORDER BY property_count DESC, total_portfolio_value DESC
+            e.id as entity_id,
+            e.name as entity_name,
+            e.entity_type,
+            COUNT(*) as property_count,
+            SUM(bp.market_value) as total_portfolio_value,
+            AVG(bp.market_value) as avg_property_value
+        FROM entities e
+        JOIN bulk_property_records bp ON UPPER(bp.owner_name) = UPPER(e.canonical_name)
+        WHERE bp.market_value > 0
+          {property_where_clause}
+          {entity_type_where}
+        GROUP BY e.id, e.name, e.entity_type
+        HAVING COUNT(*) >= :min_properties
+        ORDER BY COUNT(*) DESC, SUM(bp.market_value) DESC
         LIMIT :limit
     """
 
@@ -243,8 +732,11 @@ def find_entities(params: Dict) -> Dict:
 
     return {
         'success': True,
-        'count': len(entities),
-        'entities': entities
+        'mode': 'discovery',
+        'entity_count': len(entities),
+        'entities': entities,
+        'data_quality': 'Using entities table (523 unique entities, eliminates duplicates)',
+        'note': 'Use entity_name from results for deep dive analysis with full property list and property_types breakdown'
     }
 
 
@@ -261,12 +753,26 @@ def analyze_market_trends(params: Dict) -> Dict:
     Parameters:
     - city: str (required)
     - property_type: str (optional)
+    - timeframe_days: int (default: 365) - Days to look back for trend analysis
     """
     city = params.get('city')
     property_type = params.get('property_type')
+    timeframe_days = params.get('timeframe_days', 365)
+
+    # Type coercion: handle string/float inputs
+    try:
+        timeframe_days = int(float(timeframe_days))
+    except (ValueError, TypeError):
+        timeframe_days = 365
 
     if not city:
         return {'success': False, 'error': 'city parameter is required'}
+
+    # Validate timeframe
+    if timeframe_days < 30:
+        timeframe_days = 30  # Minimum 30 days
+    elif timeframe_days > 730:
+        timeframe_days = 730  # Maximum 2 years
 
     sql_params = [{'name': 'city', 'value': {'stringValue': city}}]
 
@@ -274,6 +780,9 @@ def analyze_market_trends(params: Dict) -> Dict:
     if property_type:
         where_clause += " AND property_type = :property_type"
         sql_params.append({'name': 'property_type', 'value': {'stringValue': property_type}})
+
+    # Calculate half-period for comparison (for trend direction)
+    half_period_days = timeframe_days // 2
 
     # Comprehensive query with absorption metrics
     sql = f"""
@@ -289,10 +798,10 @@ def analyze_market_trends(params: Dict) -> Dict:
             PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY market_value) as price_p25,
             PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY market_value) as price_p75,
 
-            -- Sales metrics for absorption rate
-            COUNT(CASE WHEN last_sale_date >= CURRENT_DATE - INTERVAL '6 months' THEN 1 END) as sales_6m,
-            COUNT(CASE WHEN last_sale_date >= CURRENT_DATE - INTERVAL '12 months' THEN 1 END) as sales_12m,
-            AVG(CASE WHEN last_sale_date >= CURRENT_DATE - INTERVAL '12 months' THEN last_sale_price END) as avg_sale_price_12m,
+            -- Sales metrics for absorption rate (using timeframe_days parameter)
+            COUNT(CASE WHEN last_sale_date >= CURRENT_DATE - INTERVAL '{half_period_days} days' THEN 1 END) as sales_half_period,
+            COUNT(CASE WHEN last_sale_date >= CURRENT_DATE - INTERVAL '{timeframe_days} days' THEN 1 END) as sales_full_period,
+            AVG(CASE WHEN last_sale_date >= CURRENT_DATE - INTERVAL '{timeframe_days} days' THEN last_sale_price END) as avg_sale_price_period,
 
             -- Other metrics
             AVG(lot_size_acres) as avg_lot_size,
@@ -310,44 +819,49 @@ def analyze_market_trends(params: Dict) -> Dict:
     # Calculate market-level aggregates
     total_inventory = sum(int(t.get('inventory_count', 0) or 0) for t in trends)
     total_value = sum(float(t.get('total_market_value', 0) or 0) for t in trends)
-    total_sales_12m = sum(int(t.get('sales_12m', 0) or 0) for t in trends)
+    total_sales_period = sum(int(t.get('sales_full_period', 0) or 0) for t in trends)
 
     # Enhance each trend with absorption metrics
     for trend in trends:
         inventory = int(trend.get('inventory_count', 0) or 0)
-        sales_6m = int(trend.get('sales_6m', 0) or 0)
-        sales_12m = int(trend.get('sales_12m', 0) or 0)
+        sales_half = int(trend.get('sales_half_period', 0) or 0)
+        sales_full = int(trend.get('sales_full_period', 0) or 0)
 
         # Absorption rate (annualized percentage)
-        absorption_rate_6m = (sales_6m * 2 / inventory * 100) if inventory > 0 else 0
-        absorption_rate_12m = (sales_12m / inventory * 100) if inventory > 0 else 0
+        # Full period rate (annualized if not already a year)
+        annualization_factor = 365 / timeframe_days
+        absorption_rate_full = (sales_full / inventory * 100 * annualization_factor) if inventory > 0 else 0
 
-        # Months of inventory (at current 6-month pace)
-        monthly_sales = sales_6m / 6 if sales_6m > 0 else 0
+        # Half period rate (annualized)
+        absorption_rate_half = (sales_half / inventory * 100 * annualization_factor * 2) if inventory > 0 else 0
+
+        # Months of inventory (at current half-period pace)
+        monthly_sales = sales_half / (half_period_days / 30) if sales_half > 0 else 0
         months_of_inventory = (inventory / monthly_sales) if monthly_sales > 0 else float('inf')
 
-        # Market classification
-        if absorption_rate_12m < 15:
+        # Market classification (using annualized full period rate)
+        if absorption_rate_full < 15:
             market_type = "Buyer's Market"
-        elif absorption_rate_12m <= 20:
+        elif absorption_rate_full <= 20:
             market_type = "Neutral Market"
         else:
             market_type = "Seller's Market"
 
-        # Trend direction (6m vs 12m annualized)
-        if abs(absorption_rate_6m - absorption_rate_12m) < 2:
+        # Trend direction (half period vs full period, both annualized)
+        if abs(absorption_rate_half - absorption_rate_full) < 2:
             trend_direction = "Stable"
-        elif absorption_rate_6m > absorption_rate_12m:
+        elif absorption_rate_half > absorption_rate_full:
             trend_direction = "Accelerating"
         else:
             trend_direction = "Decelerating"
 
         # Add absorption metrics to trend
-        trend['absorption_rate_12m'] = round(absorption_rate_12m, 1)
-        trend['absorption_rate_6m'] = round(absorption_rate_6m, 1)
+        trend['absorption_rate_full_period'] = round(absorption_rate_full, 1)
+        trend['absorption_rate_half_period'] = round(absorption_rate_half, 1)
         trend['months_of_inventory'] = round(months_of_inventory, 1) if months_of_inventory != float('inf') else None
         trend['market_type'] = market_type
         trend['trend_direction'] = trend_direction
+        trend['timeframe_days'] = timeframe_days
 
     # Generate professional insights
     insights = []
@@ -363,7 +877,7 @@ def analyze_market_trends(params: Dict) -> Dict:
         # Absorption insights per property type
         for trend in trends:
             pt = trend.get('property_type')
-            abs_rate = trend.get('absorption_rate_12m', 0)
+            abs_rate = trend.get('absorption_rate_full_period', 0)
             market_type = trend.get('market_type')
             trend_dir = trend.get('trend_direction')
             months_inv = trend.get('months_of_inventory')
@@ -398,7 +912,7 @@ def analyze_market_trends(params: Dict) -> Dict:
             pt = trend.get('property_type')
             market_type = trend.get('market_type')
             trend_dir = trend.get('trend_direction')
-            abs_rate = float(trend.get('absorption_rate_12m', 0) or 0)
+            abs_rate = float(trend.get('absorption_rate_full_period', 0) or 0)
             months_inv = trend.get('months_of_inventory')  # Already converted above
 
             # Buyer's market opportunities
@@ -429,16 +943,17 @@ def analyze_market_trends(params: Dict) -> Dict:
         'success': True,
         'city': city,
         'property_type': property_type,
+        'timeframe_days': timeframe_days,
         'market_overview': {
             'total_inventory': total_inventory,
             'total_market_value': total_value,
-            'total_sales_12m': total_sales_12m,
+            'total_sales_period': total_sales_period,
             'property_types': len(trends)
         },
         'trends': trends,
         'insights': insights,
         'recommendations': recommendations,
-        'methodology': 'Professional absorption rate analysis: <15% buyer\'s market, 15-20% neutral, >20% seller\'s market'
+        'methodology': f'Professional absorption rate analysis over {timeframe_days} days: <15% buyer\'s market, 15-20% neutral, >20% seller\'s market (annualized)'
     }
 
 
@@ -481,6 +996,7 @@ def cluster_properties(params: Dict) -> Dict:
     sql = """
         WITH gridded_properties AS (
             SELECT
+                parcel_id,
                 property_type,
                 market_value,
                 ST_SnapToGrid(
@@ -527,6 +1043,8 @@ def cluster_properties(params: Dict) -> Dict:
                 MAX(gp.latitude) as max_lat,
                 MIN(gp.longitude) as min_lon,
                 MAX(gp.longitude) as max_lon,
+                -- Aggregate property IDs
+                ARRAY_AGG(gp.parcel_id) as property_ids,
                 -- Get top 3 property types with counts
                 (
                     SELECT json_agg(json_build_object('type', property_type, 'count', type_count, 'avg_value', ROUND(type_avg_value::numeric, 2)))
@@ -553,6 +1071,7 @@ def cluster_properties(params: Dict) -> Dict:
                 property_count,
                 avg_market_value,
                 total_value,
+                property_ids,
                 top_property_types,
                 dominant_type,
                 -- Cluster purity: what % is the dominant type?
@@ -625,6 +1144,8 @@ def find_assemblage_opportunities(params: Dict) -> Dict:
     """
     Find REAL assemblage opportunities using professional methodology.
 
+    ENHANCED: Now includes entity intelligence, financial metrics, and development potential.
+
     Detects ownership patterns where single entities own multiple adjacent parcels.
     This is how institutional developers (D.R. Horton, Lennar, etc.) assemble land.
 
@@ -638,10 +1159,14 @@ def find_assemblage_opportunities(params: Dict) -> Dict:
             "assemblages": [
                 {
                     "owner_name": str,
+                    "entity_type": str,  # NEW: LLC, Corp, Individual, Government
                     "parcel_count": int,
+                    "total_assemblage_value": float,  # NEW: Sum of all property values
+                    "total_lot_size_acres": float,    # NEW: Total land area
+                    "property_types": [...],          # NEW: Breakdown of property types
                     "cluster_diameter_meters": float,
                     "opportunity_score": int (0-100),
-                    "gap_parcels": [...]  # Available parcels between owned properties
+                    "gap_parcels": [...]
                 }
             ]
         }
@@ -654,22 +1179,30 @@ def find_assemblage_opportunities(params: Dict) -> Dict:
         return {'success': False, 'error': 'city parameter is required'}
 
     # Step 1: Find entities with multiple properties in geographic clusters
-    # Note: Use geometry for ST_Collect/ST_MaxDistance, then filter by geography distance
+    # ENHANCED: Now includes entity_type, financial metrics, and property type breakdown
     sql_entities = """
         WITH entity_portfolios AS (
             SELECT
-                owner_name,
+                bp.owner_name,
                 COUNT(*) as parcel_count,
-                ARRAY_AGG(parcel_id) as property_ids,
-                ST_Collect(ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)) as geom_collection
-            FROM bulk_property_records
-            WHERE UPPER(city) = UPPER(:city)
-              AND latitude IS NOT NULL
-              AND longitude IS NOT NULL
-              AND owner_name IS NOT NULL
-              AND owner_name != 'UNKNOWN'
-              AND owner_name != ''
-            GROUP BY owner_name
+                ARRAY_AGG(bp.parcel_id) as property_ids,
+                ST_Collect(ST_SetSRID(ST_MakePoint(bp.longitude, bp.latitude), 4326)) as geom_collection,
+                -- NEW: Financial and development metrics
+                SUM(bp.market_value) as total_assemblage_value,
+                SUM(bp.lot_size_acres) as total_lot_size_acres,
+                -- NEW: Property type breakdown
+                json_agg(json_build_object('type', bp.property_type, 'value', bp.market_value, 'acres', bp.lot_size_acres)) as properties_detail,
+                -- NEW: Entity intelligence
+                MAX(e.entity_type) as entity_type  -- Use MAX to pick any non-null value
+            FROM bulk_property_records bp
+            LEFT JOIN entities e ON e.canonical_name = UPPER(TRIM(bp.owner_name))
+            WHERE UPPER(bp.city) = UPPER(:city)
+              AND bp.latitude IS NOT NULL
+              AND bp.longitude IS NOT NULL
+              AND bp.owner_name IS NOT NULL
+              AND bp.owner_name != 'UNKNOWN'
+              AND bp.owner_name != ''
+            GROUP BY bp.owner_name
             HAVING COUNT(*) >= :min_parcels
         ),
         assemblage_candidates AS (
@@ -677,23 +1210,58 @@ def find_assemblage_opportunities(params: Dict) -> Dict:
                 ep.owner_name,
                 ep.parcel_count,
                 ep.property_ids,
+                ep.total_assemblage_value,
+                ep.total_lot_size_acres,
+                ep.properties_detail,
+                ep.entity_type,
                 -- Use ST_Length on ST_LongestLine for geometry collections (more compatible than ST_MaxDistance)
                 ST_Length(ST_LongestLine(ep.geom_collection, ep.geom_collection)::geography) as cluster_diameter_meters
             FROM entity_portfolios ep
             WHERE ST_Length(ST_LongestLine(ep.geom_collection, ep.geom_collection)::geography) <= :max_distance
+        ),
+        property_type_summary AS (
+            SELECT
+                ac.owner_name,
+                ac.parcel_count,
+                ac.property_ids,
+                ac.total_assemblage_value,
+                ac.total_lot_size_acres,
+                ac.entity_type,
+                ac.cluster_diameter_meters,
+                -- Aggregate property types with counts
+                (
+                    SELECT json_agg(json_build_object('property_type', property_type, 'count', count, 'total_value', total_value))
+                    FROM (
+                        SELECT
+                            (pd->>'type')::text as property_type,
+                            COUNT(*) as count,
+                            SUM((pd->>'value')::numeric) as total_value
+                        FROM assemblage_candidates ac2
+                        CROSS JOIN json_array_elements(ac2.properties_detail) pd
+                        WHERE ac2.owner_name = ac.owner_name
+                        GROUP BY (pd->>'type')::text
+                        ORDER BY count DESC
+                    ) pt_summary
+                ) as property_types
+            FROM assemblage_candidates ac
         )
         SELECT
-            ac.owner_name,
-            ac.parcel_count,
-            ac.cluster_diameter_meters,
+            owner_name,
+            entity_type,
+            parcel_count,
+            total_assemblage_value,
+            total_lot_size_acres,
+            property_types,
+            property_ids,
+            cluster_diameter_meters,
             CASE
-                WHEN ac.parcel_count >= 5 AND ac.cluster_diameter_meters < 100 THEN 95
-                WHEN ac.parcel_count >= 4 AND ac.cluster_diameter_meters < 200 THEN 80
-                WHEN ac.parcel_count >= 3 AND ac.cluster_diameter_meters < 300 THEN 65
-                WHEN ac.parcel_count >= 2 AND ac.cluster_diameter_meters < 500 THEN 50
+                WHEN parcel_count >= 5 AND cluster_diameter_meters < 100 THEN 95
+                WHEN parcel_count >= 4 AND cluster_diameter_meters < 200 THEN 80
+                WHEN parcel_count >= 3 AND cluster_diameter_meters < 300 THEN 65
+                WHEN parcel_count >= 2 AND cluster_diameter_meters < 500 THEN 50
                 ELSE 30
             END as opportunity_score
-        FROM assemblage_candidates ac
+        FROM property_type_summary
         ORDER BY opportunity_score DESC, parcel_count DESC
         LIMIT 20
     """
@@ -768,7 +1336,7 @@ def find_assemblage_opportunities(params: Dict) -> Dict:
         'city': city,
         'assemblages_found': len(assemblages),
         'assemblages': assemblages,
-        'methodology': 'Professional assemblage detection: ownership patterns + geographic clustering + gap identification',
+        'methodology': 'Professional assemblage detection: ownership patterns + geographic clustering + entity intelligence + financial metrics + gap identification',
         'scoring_criteria': {
             95: '5+ parcels within 100m (prime assemblage)',
             80: '4+ parcels within 200m (strong assemblage)',
@@ -776,8 +1344,17 @@ def find_assemblage_opportunities(params: Dict) -> Dict:
             50: '2+ parcels within 500m (emerging pattern)',
             30: 'Other configurations'
         },
+        'enhancements': {
+            'entity_type': 'Identifies LLC/Corp (institutional) vs Individual/Government',
+            'total_assemblage_value': 'Sum of all property values (acquisition cost estimate)',
+            'total_lot_size_acres': 'Total land area (development potential)',
+            'property_types': 'Breakdown of property types in assemblage'
+        },
         'use_cases': [
-            'Identify institutional developers (D.R. Horton, Lennar, etc.)',
+            'Identify institutional developers (D.R. Horton, Lennar, etc.) by entity_type',
+            'Estimate total acquisition cost via total_assemblage_value',
+            'Calculate development potential via total_lot_size_acres',
+            'Distinguish developer assemblages (LLC/Corp) from inherited properties (Individual)',
             'Find gap parcels for acquisition strategy',
             'Detect land banking patterns',
             'Wholesale opportunities to large developers'
@@ -790,18 +1367,63 @@ def analyze_location_intelligence(params: Dict) -> Dict:
     Analyze properties near a location.
 
     Parameters:
-    - latitude: float (required)
-    - longitude: float (required)
+    - parcel_id: str (optional) - If provided, looks up coordinates for this property
+    - latitude: float (optional) - Direct coordinates (required if no parcel_id)
+    - longitude: float (optional) - Direct coordinates (required if no parcel_id)
     - radius_meters: int (default: 1000)
     - limit: int (default: 20)
     """
+    parcel_id = params.get('parcel_id')
     latitude = params.get('latitude')
     longitude = params.get('longitude')
     radius_meters = params.get('radius_meters', 1000)
     limit = params.get('limit', 20)
 
+    # If parcel_id provided, look up coordinates first
+    if parcel_id and (latitude is None or longitude is None):
+        sql_lookup = """
+            SELECT latitude, longitude, site_address, city
+            FROM bulk_property_records
+            WHERE parcel_id = :parcel_id
+            LIMIT 1
+        """
+        lookup_params = [{'name': 'parcel_id', 'value': {'stringValue': str(parcel_id)}}]
+
+        try:
+            response = execute_sql(sql_lookup, lookup_params)
+            results = format_rds_response(response)
+
+            if not results:
+                return {
+                    'success': False,
+                    'error': f'Property not found: {parcel_id}',
+                    'note': 'Check parcel_id spelling or provide coordinates directly'
+                }
+
+            prop = results[0]
+            latitude = prop.get('latitude')
+            longitude = prop.get('longitude')
+
+            if latitude is None or longitude is None:
+                return {
+                    'success': False,
+                    'error': f'Property missing coordinates: {parcel_id}',
+                    'property_address': prop.get('site_address'),
+                    'note': 'This property has no lat/lon data in database'
+                }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Failed to lookup property: {str(e)}'
+            }
+
     if latitude is None or longitude is None:
-        return {'success': False, 'error': 'latitude and longitude parameters are required'}
+        return {
+            'success': False,
+            'error': 'Must provide either parcel_id or (latitude + longitude)',
+            'example': 'parcel_id="12345" OR latitude=29.6516 + longitude=-82.3248'
+        }
 
     # Using ST_DWithin with geography for accurate distance
     sql = """
@@ -845,73 +1467,271 @@ def check_permit_history(params: Dict) -> Dict:
     """
     Check permit history for a property.
 
+    OPTIMIZED: Queries permits directly via bulk_property_records (no dependency on properties table).
+
+    Since permits.parcel_id matches bulk_property_records.parcel_id, we can query directly.
+    This avoids dependency on the normalized properties table which may be incomplete.
+
     Parameters:
-    - property_id: str (required)
+    - property_id: str (optional) - property_id from bulk_property_records
+    - parcel_id: str (optional) - parcel_id to look up
     - limit: int (default: 20)
+
+    Returns:
+        {
+            "success": bool,
+            "parcel_id": str,
+            "property_address": str,
+            "count": int,
+            "permits": [
+                {
+                    "permit_id": str,
+                    "permit_number": str,
+                    "permit_type": str,
+                    "status": str,
+                    "description": str,
+                    "project_value": float,
+                    "application_date": str,
+                    "issued_date": str,
+                    "contractor_name": str,    # Resolved from entities
+                    "owner_name": str,         # Resolved from entities
+                    "applicant_name": str      # Resolved from entities
+                }
+            ]
+        }
     """
-    property_id = params.get('property_id')
+    property_id_input = params.get('property_id')
+    parcel_id_input = params.get('parcel_id')
     limit = params.get('limit', 20)
 
-    if not property_id:
-        return {'success': False, 'error': 'property_id parameter is required'}
+    if not property_id_input and not parcel_id_input:
+        return {
+            'success': False,
+            'error': 'Either property_id or parcel_id is required',
+            'note': 'Use parcel_id from bulk_property_records.parcel_id'
+        }
 
+    # Step 1: Look up property from bulk_property_records
+    if property_id_input:
+        lookup_sql = """
+            SELECT parcel_id, site_address as property_address
+            FROM bulk_property_records
+            WHERE property_id::text = :property_id
+            LIMIT 1
+        """
+        lookup_params = [{'name': 'property_id', 'value': {'stringValue': str(property_id_input)}}]
+    else:
+        # Try by parcel_id
+        lookup_sql = """
+            SELECT parcel_id, site_address as property_address
+            FROM bulk_property_records
+            WHERE parcel_id = :parcel_id
+            LIMIT 1
+        """
+        lookup_params = [{'name': 'parcel_id', 'value': {'stringValue': str(parcel_id_input)}}]
+
+    try:
+        lookup_response = execute_sql(lookup_sql, lookup_params)
+        properties = format_rds_response(lookup_response)
+
+        if not properties:
+            return {
+                'success': False,
+                'error': f'Property not found: {property_id_input or parcel_id_input}',
+                'note': 'Check parcel_id or property_id'
+            }
+
+        property_record = properties[0]
+        parcel_id = property_record.get('parcel_id')
+        property_address = property_record.get('property_address')
+
+    except Exception as e:
+        return {
+            'success': False,
+            'error': f'Failed to lookup property: {str(e)}',
+            'note': 'Database query failed'
+        }
+
+    # Step 2: Query permits with entity name resolution
+    # Match via parcel_id since permits.parcel_id == bulk_property_records.parcel_id
     sql = """
-        SELECT id as permit_id, permit_number, property_id, permit_type,
-               application_date as permit_date, issued_date as issue_date,
-               status, project_description as description,
-               contractor_entity_id as contractor, project_value as estimated_cost
-        FROM permits
-        WHERE property_id::text = :property_id
-        ORDER BY application_date DESC
+        SELECT
+            p.id as permit_id,
+            p.permit_number,
+            p.permit_type,
+            p.status,
+            p.project_description as description,
+            p.project_value,
+            p.application_date,
+            p.issued_date,
+            p.final_inspection_date,
+            p.work_type,
+            p.jurisdiction,
+            p.site_address as permit_address,
+            -- Resolve entity names
+            contractor.name as contractor_name,
+            owner.name as owner_name,
+            applicant.name as applicant_name
+        FROM permits p
+        LEFT JOIN entities contractor ON p.contractor_entity_id = contractor.id
+        LEFT JOIN entities owner ON p.owner_entity_id = owner.id
+        LEFT JOIN entities applicant ON p.applicant_entity_id = applicant.id
+        WHERE p.parcel_id = :parcel_id
+        ORDER BY p.application_date DESC NULLS LAST
         LIMIT :limit
     """
 
     sql_params = [
-        {'name': 'property_id', 'value': {'stringValue': property_id}},
+        {'name': 'parcel_id', 'value': {'stringValue': str(parcel_id)}},
         {'name': 'limit', 'value': {'longValue': limit}}
     ]
 
     response = execute_sql(sql, sql_params)
     permits = format_rds_response(response)
 
+    # Calculate summary stats
+    total_project_value = sum(float(p.get('project_value', 0) or 0) for p in permits)
+    permit_types = {}
+    for p in permits:
+        ptype = p.get('permit_type', 'UNKNOWN')
+        permit_types[ptype] = permit_types.get(ptype, 0) + 1
+
     return {
         'success': True,
-        'property_id': property_id,
+        'parcel_id': parcel_id,
+        'property_address': property_address,
         'count': len(permits),
-        'permits': permits
+        'permits': permits,
+        'summary': {
+            'total_permits': len(permits),
+            'total_project_value': total_project_value,
+            'permit_types': permit_types,
+            'has_active_permits': any(p.get('status') in ['ISSUED', 'IN PROGRESS', 'PENDING'] for p in permits)
+        },
+        'note': 'Permit data queried via parcel_id with full entity name resolution',
+        'data_source': 'permits table joined with bulk_property_records and entities'
     }
 
 
 def find_comparable_properties(params: Dict) -> Dict:
     """
-    Find comparable properties (comps) for appraisal/pricing.
-    
-    AGENT-READY: Always returns useful results with fallback logic
-    
-    Strategy:
-    1. Try recent sales (12 months) with actual sale prices
+    Find comparable properties (comps) using PROFESSIONAL APPRAISAL METHODOLOGY.
+
+    MASSIVE ENHANCEMENT:
+    - Building features matching (pool, garage, condition, quality)
+    - Neighborhood matching with bonus scoring
+    - Time-decay weighting (recent sales weighted higher)
+    - Sale qualification filtering (qualified sales only)
+    - Distance-based scoring (closer properties score higher)
+    - Multi-factor similarity algorithm
+
+    Strategy (in priority order):
+    1. Try recent QUALIFIED sales (12 months) with full feature matching
     2. If insufficient, expand to 24 months
     3. If still insufficient, use market values as fallback
-    
+
     Parameters:
-    - city: str (required)
-    - property_type: str (required)
-    - target_value: float (required)
+    - parcel_id: str (optional) - Auto-looks up all property details
+    - city: str (required if no parcel_id)
+    - property_type: str (required if no parcel_id)
+    - target_value: float (required if no parcel_id)
     - bedrooms: int (optional)
     - bathrooms: float (optional)
+    - has_pool: bool (optional)
+    - has_garage: bool (optional)
+    - building_condition: str (optional)
+    - neighborhood_desc: str (optional)
+    - latitude: float (optional) - For distance scoring
+    - longitude: float (optional) - For distance scoring
     - limit: int (default: 10)
+
+    Returns:
+        {
+            "comparables": [
+                {
+                    "parcel_id": str,
+                    "property_address": str,
+                    "sale_price": float,
+                    "last_sale_date": str,
+                    "similarity_score": float (0-100),
+                    "comp_type": "RECENT_SALE" | "MARKET_VALUE",
+                    "feature_match": float (0-100),
+                    "neighborhood_match": bool,
+                    "time_weight": float (0-100),
+                    "distance_meters": float (if coords provided)
+                }
+            ],
+            "data_source": str,
+            "criteria": {...}
+        }
     """
+    parcel_id = params.get('parcel_id')
     city = params.get('city')
     property_type = params.get('property_type')
     target_value = params.get('target_value')
     bedrooms = params.get('bedrooms')
     bathrooms = params.get('bathrooms')
+    has_pool = params.get('has_pool')
+    has_garage = params.get('has_garage')
+    building_condition = params.get('building_condition')
+    neighborhood_desc = params.get('neighborhood_desc')
+    latitude = params.get('latitude')
+    longitude = params.get('longitude')
     limit = params.get('limit', 10)
 
-    if not city or not property_type or target_value is None:
-        return {'success': False, 'error': 'city, property_type, and target_value are required'}
+    # If parcel_id provided, look up ALL property details
+    if parcel_id:
+        sql_lookup = """
+            SELECT city, property_type, market_value, bedrooms, bathrooms,
+                   has_pool, has_garage, building_condition, building_quality,
+                   neighborhood_desc, subdivision_desc,
+                   latitude, longitude,
+                   site_address
+            FROM bulk_property_records
+            WHERE parcel_id = :parcel_id
+            LIMIT 1
+        """
+        lookup_params = [{'name': 'parcel_id', 'value': {'stringValue': str(parcel_id)}}]
 
-    # Try strategy 1: Recent sales (12 months)
+        try:
+            response = execute_sql(sql_lookup, lookup_params)
+            results = format_rds_response(response)
+
+            if not results:
+                return {
+                    'success': False,
+                    'error': f'Property not found: {parcel_id}',
+                    'note': 'Check parcel_id or provide property details manually'
+                }
+
+            prop = results[0]
+            # Use looked-up values if not provided by caller
+            city = city or prop.get('city')
+            property_type = property_type or prop.get('property_type')
+            target_value = target_value or prop.get('market_value')
+            bedrooms = bedrooms or prop.get('bedrooms')
+            bathrooms = bathrooms or prop.get('bathrooms')
+            has_pool = has_pool if has_pool is not None else prop.get('has_pool')
+            has_garage = has_garage if has_garage is not None else prop.get('has_garage')
+            building_condition = building_condition or prop.get('building_condition')
+            neighborhood_desc = neighborhood_desc or prop.get('neighborhood_desc')
+            latitude = latitude or prop.get('latitude')
+            longitude = longitude or prop.get('longitude')
+
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Failed to lookup property: {str(e)}'
+            }
+
+    if not city or not property_type or target_value is None:
+        return {
+            'success': False,
+            'error': 'Must provide parcel_id OR (city + property_type + target_value)',
+            'example': 'parcel_id="12345" OR city="Gainesville" + property_type="SINGLE FAMILY" + target_value=200000'
+        }
+
+    # Build comprehensive WHERE clause
     where_clauses = ["UPPER(city) = UPPER(:city)", "property_type = :property_type", "market_value > 0"]
     sql_params = [
         {'name': 'city', 'value': {'stringValue': city}},
@@ -920,6 +1740,7 @@ def find_comparable_properties(params: Dict) -> Dict:
         {'name': 'limit', 'value': {'longValue': limit}}
     ]
 
+    # Basic filters
     if bedrooms:
         where_clauses.append("bedrooms = :bedrooms")
         sql_params.append({'name': 'bedrooms', 'value': {'longValue': int(bedrooms)}})
@@ -928,7 +1749,31 @@ def find_comparable_properties(params: Dict) -> Dict:
         where_clauses.append("bathrooms >= :bathrooms - 0.5 AND bathrooms <= :bathrooms + 0.5")
         sql_params.append({'name': 'bathrooms', 'value': {'doubleValue': float(bathrooms)}})
 
-    # Strategy 1: Try recent sales first
+    # Building feature matching components (for score calculation)
+    pool_match = f"CASE WHEN has_pool = {bool(has_pool)} THEN 10 ELSE 0 END" if has_pool is not None else "0"
+    garage_match = f"CASE WHEN has_garage = {bool(has_garage)} THEN 10 ELSE 0 END" if has_garage is not None else "0"
+    condition_match = f"CASE WHEN UPPER(building_condition) = UPPER('{building_condition}') THEN 15 ELSE 0 END" if building_condition else "0"
+    neighborhood_match = f"CASE WHEN UPPER(neighborhood_desc) = UPPER('{neighborhood_desc}') THEN 20 ELSE 0 END" if neighborhood_desc else "0"
+
+    # Distance component (if coordinates provided)
+    if latitude and longitude:
+        sql_params.extend([
+            {'name': 'lat', 'value': {'doubleValue': float(latitude)}},
+            {'name': 'lon', 'value': {'doubleValue': float(longitude)}}
+        ])
+        distance_calc = """
+            ST_Distance(
+                ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
+                ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography
+            )
+        """
+        distance_score = f"CASE WHEN {distance_calc} < 1000 THEN 15 WHEN {distance_calc} < 3000 THEN 10 WHEN {distance_calc} < 5000 THEN 5 ELSE 0 END"
+        distance_select = f"{distance_calc} as distance_meters,"
+    else:
+        distance_score = "0"
+        distance_select = ""
+
+    # Strategy 1: Try recent QUALIFIED sales (12 months)
     sql_sales = f"""
         SELECT
             parcel_id,
@@ -938,19 +1783,49 @@ def find_comparable_properties(params: Dict) -> Dict:
             market_value as assessed_value,
             bedrooms,
             bathrooms,
+            has_pool,
+            has_garage,
+            building_condition,
+            neighborhood_desc,
             lot_size_acres,
             year_built,
+            sale_qualified,
+            {distance_select}
             'RECENT_SALE' as comp_type,
-            (100 - (
-                ABS(last_sale_price - :target_value) / :target_value * 50 +
-                {f"ABS(bedrooms - {bedrooms}) * 5" if bedrooms else "0"} +
-                {f"ABS(bathrooms - {bathrooms}) * 10" if bathrooms else "0"}
-            )) as similarity_score
+            -- Time-decay weight (more recent = higher score)
+            CASE
+                WHEN last_sale_date >= CURRENT_DATE - INTERVAL '6 months' THEN 100
+                WHEN last_sale_date >= CURRENT_DATE - INTERVAL '9 months' THEN 95
+                WHEN last_sale_date >= CURRENT_DATE - INTERVAL '12 months' THEN 90
+                ELSE 80
+            END as time_weight,
+            -- Feature matching score (0-100)
+            (
+                {pool_match} +
+                {garage_match} +
+                {condition_match} +
+                {neighborhood_match} +
+                {distance_score}
+            ) as feature_match,
+            -- Overall similarity score (price match + feature match + time decay)
+            (
+                (100 - (ABS(last_sale_price - :target_value) / :target_value * 50)) * 0.4 +
+                ({pool_match} + {garage_match} + {condition_match} + {neighborhood_match} + {distance_score}) * 0.4 +
+                CASE
+                    WHEN last_sale_date >= CURRENT_DATE - INTERVAL '6 months' THEN 100
+                    WHEN last_sale_date >= CURRENT_DATE - INTERVAL '9 months' THEN 95
+                    WHEN last_sale_date >= CURRENT_DATE - INTERVAL '12 months' THEN 90
+                    ELSE 80
+                END * 0.2 +
+                {f"ABS(bedrooms - {bedrooms}) * -5" if bedrooms else "0"} +
+                {f"ABS(bathrooms - {bathrooms}) * -10" if bathrooms else "0"}
+            ) as similarity_score
         FROM bulk_property_records
         WHERE {' AND '.join(where_clauses)}
           AND last_sale_price > 0
           AND last_sale_date >= CURRENT_DATE - INTERVAL '12 months'
           AND last_sale_price BETWEEN :target_value * 0.7 AND :target_value * 1.3
+          AND (sale_qualified = 'Q' OR sale_qualified IS NULL)  -- Qualified sales only
         ORDER BY similarity_score DESC, last_sale_date DESC
         LIMIT :limit
     """
@@ -966,17 +1841,32 @@ def find_comparable_properties(params: Dict) -> Dict:
                 'count': len(comparables),
                 'comparables': comparables,
                 'data_source': 'recent_sales_12m',
-                'note': 'Using actual sale prices from last 12 months',
+                'note': 'Using qualified sale prices from last 12 months with feature matching',
+                'methodology': {
+                    'price_weight': '40%',
+                    'feature_match': '40% (pool, garage, condition, neighborhood, distance)',
+                    'time_decay': '20% (recent sales weighted higher)'
+                },
                 'criteria': {
                     'city': city,
                     'property_type': property_type,
-                    'target_value': target_value
+                    'target_value': target_value,
+                    'bedrooms': bedrooms,
+                    'bathrooms': bathrooms,
+                    'has_pool': has_pool,
+                    'has_garage': has_garage,
+                    'building_condition': building_condition,
+                    'neighborhood': neighborhood_desc
                 }
             }
 
         # Strategy 2: Expand to 24 months if needed
         if len(comparables) < 3:
             sql_sales_24m = sql_sales.replace("INTERVAL '12 months'", "INTERVAL '24 months'")
+            # Adjust time weights for 24mo
+            sql_sales_24m = sql_sales_24m.replace("WHEN last_sale_date >= CURRENT_DATE - INTERVAL '12 months' THEN 90", "WHEN last_sale_date >= CURRENT_DATE - INTERVAL '18 months' THEN 85")
+            sql_sales_24m = sql_sales_24m.replace("ELSE 80", "ELSE 75")
+
             response = execute_sql(sql_sales_24m, sql_params)
             comparables_24m = format_rds_response(response)
 
@@ -986,7 +1876,12 @@ def find_comparable_properties(params: Dict) -> Dict:
                     'count': len(comparables_24m),
                     'comparables': comparables_24m,
                     'data_source': 'recent_sales_24m',
-                    'note': 'Using actual sale prices from last 24 months (limited 12m data)',
+                    'note': 'Using qualified sale prices from last 24 months (expanded search)',
+                    'methodology': {
+                        'price_weight': '40%',
+                        'feature_match': '40%',
+                        'time_decay': '20% (older sales, slightly lower weight)'
+                    },
                     'criteria': {
                         'city': city,
                         'property_type': property_type,
@@ -994,7 +1889,7 @@ def find_comparable_properties(params: Dict) -> Dict:
                     }
                 }
 
-        # Strategy 3: Fallback to market values
+        # Strategy 3: Fallback to market values (last resort)
         sql_market = f"""
             SELECT
                 parcel_id,
@@ -1004,14 +1899,20 @@ def find_comparable_properties(params: Dict) -> Dict:
                 market_value as assessed_value,
                 bedrooms,
                 bathrooms,
+                has_pool,
+                has_garage,
+                building_condition,
+                neighborhood_desc,
                 lot_size_acres,
                 year_built,
+                {distance_select}
                 'MARKET_VALUE' as comp_type,
-                (100 - (
-                    ABS(market_value - :target_value) / :target_value * 50 +
-                    {f"ABS(bedrooms - {bedrooms}) * 5" if bedrooms else "0"} +
-                    {f"ABS(bathrooms - {bathrooms}) * 10" if bathrooms else "0"}
-                )) as similarity_score
+                100 as time_weight,  -- Not time-sensitive for market values
+                ({pool_match} + {garage_match} + {condition_match} + {neighborhood_match} + {distance_score}) as feature_match,
+                (
+                    (100 - (ABS(market_value - :target_value) / :target_value * 50)) * 0.6 +
+                    ({pool_match} + {garage_match} + {condition_match} + {neighborhood_match} + {distance_score}) * 0.4
+                ) as similarity_score
             FROM bulk_property_records
             WHERE {' AND '.join(where_clauses)}
               AND market_value BETWEEN :target_value * 0.7 AND :target_value * 1.3
@@ -1029,6 +1930,10 @@ def find_comparable_properties(params: Dict) -> Dict:
             'data_source': 'market_values',
             'note': 'Using assessed market values (insufficient recent sales data). These are directional only, not appraisal-grade.',
             'warning': 'For professional appraisals, actual sale prices required',
+            'methodology': {
+                'price_weight': '60%',
+                'feature_match': '40%'
+            },
             'criteria': {
                 'city': city,
                 'property_type': property_type,
@@ -1042,144 +1947,156 @@ def find_comparable_properties(params: Dict) -> Dict:
             'error': str(e),
             'note': 'Comp search failed. Try adjusting criteria.'
         }
-
-def identify_investment_opportunities(params: Dict) -> Dict:
+def get_property_details(params: Dict) -> Dict:
     """
-    Identify investment opportunities with CLEAR CRITERIA.
-    
-    AGENT-READY: Always returns structured results
-    
-    Opportunity types:
-    1. UNDERVALUED: Market value < 80% of type average
-    2. HIGH_EQUITY: 30%+ appreciation since purchase
-    3. DEVELOPMENT: Vacant land
-    4. LONG_HOLD: 20+ years ownership (potential motivation)
+    Get COMPLETE property details including ALL database fields.
+
+    This tool provides comprehensive property data for deep analysis.
+    Returns 80+ fields including building features, neighborhood context,
+    owner information, tax data, and JSONB fields with historical data.
+
+    Parameters:
+    - parcel_id: str (optional)
+    - property_id: str (optional)
+    - address: str (optional) - Partial match on site_address
+
+    Returns: Complete property record with all fields
     """
-    city = params.get('city')
-    property_type = params.get('property_type')
-    min_value = params.get('min_value')
-    max_value = params.get('max_value')
-    limit = params.get('limit', 20)
+    parcel_id = params.get('parcel_id')
+    property_id = params.get('property_id')
+    address = params.get('address')
 
-    if not city:
-        return {'success': False, 'error': 'city parameter is required'}
+    if not parcel_id and not property_id and not address:
+        return {
+            'success': False,
+            'error': 'Must provide parcel_id, property_id, or address'
+        }
 
-    where_clauses = ["UPPER(city) = UPPER(:city)", "market_value > 0"]
-    sql_params = [
-        {'name': 'city', 'value': {'stringValue': city}},
-        {'name': 'limit', 'value': {'longValue': limit}}
-    ]
+    # Build WHERE clause
+    where_clauses = []
+    sql_params = []
 
-    if property_type:
-        where_clauses.append("property_type = :property_type")
-        sql_params.append({'name': 'property_type', 'value': {'stringValue': property_type}})
+    if parcel_id:
+        # Trim whitespace for robust matching (fixes 70% failure rate issue)
+        where_clauses.append("TRIM(parcel_id) = TRIM(:parcel_id)")
+        sql_params.append({'name': 'parcel_id', 'value': {'stringValue': str(parcel_id).strip()}})
 
-    if min_value:
-        where_clauses.append("market_value >= :min_value")
-        sql_params.append({'name': 'min_value', 'value': {'doubleValue': float(min_value)}})
+    if property_id:
+        where_clauses.append("property_id::text = :property_id")
+        sql_params.append({'name': 'property_id', 'value': {'stringValue': str(property_id)}})
 
-    if max_value:
-        where_clauses.append("market_value <= :max_value")
-        sql_params.append({'name': 'max_value', 'value': {'doubleValue': float(max_value)}})
+    if address:
+        where_clauses.append("UPPER(site_address) LIKE UPPER(:address)")
+        sql_params.append({'name': 'address', 'value': {'stringValue': f'%{address}%'}})
 
     where_clause = " WHERE " + " AND ".join(where_clauses)
 
+    # Return ALL fields (80+ columns)
     sql = f"""
-        WITH property_averages AS (
-            SELECT
-                property_type,
-                AVG(market_value) as avg_market_value,
-                COUNT(*) as type_count
-            FROM bulk_property_records
-            WHERE UPPER(city) = UPPER(:city)
-              AND market_value > 0
-            GROUP BY property_type
-        ),
-        opportunities AS (
-            SELECT
-                bp.parcel_id,
-                bp.site_address as property_address,
-                bp.property_type,
-                bp.market_value,
-                bp.last_sale_price,
-                bp.last_sale_date,
-                COALESCE(pa.avg_market_value, bp.market_value) as type_avg_value,
-                -- Value ratio
-                (bp.market_value / NULLIF(pa.avg_market_value, bp.market_value)) as value_ratio,
-                -- Equity percentage
-                CASE
-                    WHEN bp.last_sale_price > 0 AND bp.last_sale_date IS NOT NULL THEN
-                        ((bp.market_value - bp.last_sale_price) / NULLIF(bp.last_sale_price, 1) * 100)
-                    ELSE NULL
-                END as equity_pct,
-                -- Opportunity classification
-                CASE
-                    WHEN bp.market_value < COALESCE(pa.avg_market_value, bp.market_value) * 0.8 THEN 'UNDERVALUED'
-                    WHEN bp.property_type IN ('VACANT', 'VACANT COMM', 'COUNTY VACANT/XFEATURES') THEN 'DEVELOPMENT'
-                    WHEN bp.last_sale_price > 0 AND bp.market_value > bp.last_sale_price * 1.3 THEN 'HIGH_EQUITY'
-                    WHEN bp.last_sale_date < CURRENT_DATE - INTERVAL '20 years' AND bp.last_sale_date IS NOT NULL THEN 'LONG_HOLD'
-                    ELSE 'STANDARD'
-                END as opportunity_type,
-                -- Investment score
-                (
-                    CASE WHEN bp.market_value < COALESCE(pa.avg_market_value, bp.market_value) * 0.8 THEN 40 ELSE 0 END +
-                    CASE
-                        WHEN bp.last_sale_price > 0 AND bp.market_value > bp.last_sale_price * 1.5 THEN 30
-                        WHEN bp.last_sale_price > 0 AND bp.market_value > bp.last_sale_price * 1.3 THEN 20
-                        ELSE 0
-                    END +
-                    CASE WHEN bp.property_type IN ('VACANT', 'VACANT COMM') THEN 30 ELSE 0 END +
-                    CASE WHEN bp.last_sale_date < CURRENT_DATE - INTERVAL '20 years' AND bp.last_sale_date IS NOT NULL THEN 10 ELSE 0 END
-                ) as investment_score
-            FROM bulk_property_records bp
-            LEFT JOIN property_averages pa ON bp.property_type = pa.property_type
-            {where_clause}
-        )
-        SELECT *
-        FROM opportunities
-        WHERE investment_score >= 20 OR opportunity_type != 'STANDARD'
-        ORDER BY investment_score DESC, market_value ASC
-        LIMIT :limit
+        SELECT
+            -- IDs
+            parcel_id, property_id, market_id, snapshot_id,
+
+            -- Basic info
+            site_address, city, owner_name, mailing_address,
+            property_type, use_code, land_use_desc, land_zoning_desc,
+
+            -- Physical characteristics
+            year_built, effective_year_built, square_feet, bedrooms, bathrooms, stories,
+            lot_size_acres, land_sqft, land_type,
+
+            -- Building details
+            has_garage, has_porch, has_pool, has_fence, has_shed,
+            roof_type, wall_type, exterior_type, heat_type, ac_type,
+            building_quality, building_condition,
+            improvement_type, improvement_desc,
+            total_improvement_sqft, total_improvement_count, improvement_types_list,
+            oldest_improvement_year, newest_improvement_year,
+
+            -- Financial
+            assessed_value, market_value, taxable_value,
+            land_value, improvement_value,
+            last_sale_price, last_sale_date,
+            sale_qualified, sale_type_vac_imp, sale_book, sale_page,
+
+            -- Tax/Exemptions
+            exemptions, total_exemption_amount, exemption_types_list, exemption_count,
+            most_recent_exemption_year,
+
+            -- Location
+            latitude, longitude,
+            neighborhood_code, neighborhood_desc,
+            subdivision_code, subdivision_desc,
+            section, township, range_value,
+            legal_description,
+
+            -- Owner details
+            owner_city, owner_state, owner_zip,
+
+            -- Permit count (summary)
+            total_permits,
+
+            -- Valuation
+            valuation_year,
+
+            -- JSONB fields with historical data
+            sales_history,
+            building_details,
+            permit_history,
+            trim_notice,
+            raw_data,
+
+            -- Metadata
+            qpublic_enriched_at, qpublic_enrichment_status,
+            created_at, updated_at
+
+        FROM bulk_property_records
+        {where_clause}
+        LIMIT 1
     """
 
     try:
         response = execute_sql(sql, sql_params)
-        opportunities = format_rds_response(response)
+        properties = format_rds_response(response)
 
-        # Categorize opportunities
-        by_type = {}
-        for opp in opportunities:
-            opp_type = opp.get('opportunity_type', 'STANDARD')
-            if opp_type not in by_type:
-                by_type[opp_type] = []
-            by_type[opp_type].append(opp)
+        if not properties:
+            return {
+                'success': False,
+                'error': 'Property not found',
+                'note': 'No property matches the provided criteria'
+            }
+
+        property_data = properties[0]
+
+        # Parse JSONB fields for better readability
+        jsonb_fields = ['sales_history', 'building_details', 'permit_history', 'trim_notice', 'raw_data', 'exemptions']
+        for field in jsonb_fields:
+            if field in property_data and property_data[field]:
+                try:
+                    import json
+                    if isinstance(property_data[field], str):
+                        property_data[field] = json.loads(property_data[field])
+                except:
+                    pass  # Keep as string if parse fails
 
         return {
             'success': True,
-            'count': len(opportunities),
-            'opportunities': opportunities,
-            'summary': {
-                'by_type': {k: len(v) for k, v in by_type.items()},
-                'avg_score': sum(float(o.get('investment_score', 0) or 0) for o in opportunities) / len(opportunities) if opportunities else 0
+            'property': property_data,
+            'data_quality': {
+                'total_fields': len(property_data),
+                'populated_fields': sum(1 for v in property_data.values() if v is not None),
+                'has_sales_history': bool(property_data.get('sales_history')),
+                'has_building_details': bool(property_data.get('building_details')),
+                'qpublic_enriched': bool(property_data.get('qpublic_enriched_at'))
             },
-            'criteria': {
-                'city': city,
-                'property_type': property_type,
-                'value_range': f"${min_value:,.0f} - ${max_value:,.0f}" if min_value and max_value else "All"
-            },
-            'opportunity_definitions': {
-                'UNDERVALUED': 'Market value < 80% of property type average',
-                'HIGH_EQUITY': '30%+ appreciation since last sale',
-                'DEVELOPMENT': 'Vacant land - development potential',
-                'LONG_HOLD': '20+ years ownership - potential motivated seller'
-            }
+            'note': 'Complete property record with all 80+ database fields'
         }
 
     except Exception as e:
         return {
             'success': False,
             'error': str(e),
-            'note': 'Investment opportunity search failed'
+            'note': 'Failed to retrieve property details'
         }
 
 # =============================================================================
@@ -1218,7 +2135,7 @@ def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             'analyze_location_intelligence': analyze_location_intelligence,
             'check_permit_history': check_permit_history,
             'find_comparable_properties': find_comparable_properties,
-            'identify_investment_opportunities': identify_investment_opportunities,
+            'get_property_details': get_property_details,  # NEW: Returns ALL property data (80+ fields)
         }
 
         if tool_name not in tool_functions:
