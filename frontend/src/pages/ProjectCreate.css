@@ -21,15 +21,20 @@
   font-size: 0.75rem;
 }
 
-.project-create__title-row {
-  /* Side-by-side row with vertical centering */
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: clamp(16px, 4vw, 32px);
-  flex-wrap: wrap;
-}
-
+.project-create__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(16px, 4vw, 32px);
+  flex-wrap: wrap;
+}
+
+.project-create__title-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 /* Ensure the H1 has centered text to align with the button */
 .project-create__masthead h1 {
   margin: 0;
@@ -568,3 +573,29 @@
     flex: 1 0 auto;
   }
 }
+
+.project-create__import {
+  flex-shrink: 0;
+  border-radius: 18px;
+  padding: 12px 18px;
+  border: 1px solid rgba(68, 110, 135, 0.35);
+  background: rgba(255, 255, 255, 0.9);
+  color: rgba(5, 14, 24, 0.78);
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  transition: border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.project-create__import:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  transform: translateY(-2px);
+}
+
+.project-create__import-input {
+  display: none;
+}
+

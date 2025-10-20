@@ -307,11 +307,13 @@ export const Landing = () => {
 
       <section className="landing__section landing__section--split landing__observe" id="signals">
         <div className="landing__split-copy">
-          <p className="landing__eyebrow">What you get</p>
-          <h2>Real patterns. Real opportunities.</h2>
-          <p>
-            Actual intelligence from Gainesville. Every project delivers insights like these.
-          </p>
+          <div className="landing__section-heading">
+            <p className="landing__eyebrow">What you get</p>
+            <h2>Real patterns. Real opportunities.</h2>
+            <p>
+              Actual intelligence from Gainesville. Every project delivers insights like these.
+            </p>
+          </div>
           <div className="landing__signal-grid">
             {signalHighlights.map((signal) => (
               <div key={signal.title} className="landing__signal-card">
@@ -361,6 +363,9 @@ export const Landing = () => {
         <div className="landing__section-heading">
           <p className="landing__eyebrow">Use cases</p>
           <h2>What you can do with it.</h2>
+          <p>
+            Pick a scenario to see how Dominion guides everyday workflows for acquisition teams.
+          </p>
         </div>
         <div className="landing__grid">
           {useCases.map((useCase) => (
@@ -377,6 +382,9 @@ export const Landing = () => {
           <div className="landing__section-heading">
             <p className="landing__eyebrow">Technical foundation</p>
             <h2>Purpose-built for real estate intelligence.</h2>
+            <p>
+              These building blocks keep the agent grounded in production data and ready for scale.
+            </p>
           </div>
 
           <div className="landing__data-visual landing__observe">
@@ -391,6 +399,8 @@ export const Landing = () => {
               <div className="landing__data-node landing__data-node--4">Ordinances</div>
               <div className="landing__data-node landing__data-node--5">GIS Data</div>
               <div className="landing__data-node landing__data-node--6">Ownership</div>
+              <div className="landing__data-node landing__data-node--7">News</div>
+              <div className="landing__data-node landing__data-node--8">City Council</div>
             </div>
           </div>
         </div>

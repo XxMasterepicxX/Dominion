@@ -156,9 +156,19 @@ export const Projects = () => {
                           <span className="projects__progress-value">{progress}%</span>
                         </div>
                         <footer className="projects__card-footer">
-                          <Link className="projects__open" to={`/dashboard?projectId=${project.id}`}>
-                            Open project -&gt;
-                          </Link>
+                          {project.status === 'draft' ? (
+                            <Link className="projects__open projects__open--draft" to={`/projects/new?draft=${project.id}`}>
+                              Continue planning -&gt;
+                            </Link>
+                          ) : project.status === 'generating' ? (
+                            <Link className="projects__open" to={`/dashboard?projectId=${project.id}`}>
+                              View progress -&gt;
+                            </Link>
+                          ) : (
+                            <Link className="projects__open" to={`/dashboard?projectId=${project.id}`}>
+                              Open project -&gt;
+                            </Link>
+                          )}
                         </footer>
                       </article>
                     );
