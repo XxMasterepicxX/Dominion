@@ -98,4 +98,35 @@ If you need to deploy AWS infrastructure (Aurora, Lambdas, AgentCore) from scrat
 
 ```bash
 cd infrastructure
-... (33 lines left)
+pip install -r requirements.txt
+cdk bootstrap
+cdk deploy
+```
+
+### Frontend Setup
+
+```bash
+cd frontend
+
+# Install dependencies
+npm install
+
+# Provide environment config (create .env.local or edit .env)
+echo "VITE_AGENT_URL=http://localhost:8080/invocations" > .env.local
+echo "REACT_APP_API_BASE_URL=http://localhost:8000" >> .env.local
+
+# Start the development server
+npm run dev
+```
+
+Point your browser to the printed Vite URL (typically `http://localhost:5173`). Submit prompts from the dashboard; the app will call the locally running AgentCore endpoint or fall back to mock data if services are unavailable.
+
+## Challenges We Faced & What We Learned
+
+Coordinating multi-minute, multi-agent workflows required aggressive use of Bedrock AgentCore health pings to avoid Lambda timeouts, and tuning Titan embeddings against pgvector highlighted the importance of dimensionality checks and normalization (`infrastructure/lambda/rag/handler.py`). We found that Titan embeddings yielded only ~60% retrieval accuracy, so we built our own embedding model optimized for ordinance data, achieving higher recall and semantic alignment. We also learned that declarative infrastructure with CDK made iterating on Aurora/Lambda contracts far faster than manual CloudFormation templating.
+
+## What's Next?
+
+  * Extend the tool belt with live scrapers (QPublic, SunBiz) running in containers behind asynchronous queues.
+  * Harden the reasoning layer with evaluator loops and scenario simulations for ambiguous markets.
+  * Package Dominion as a managed AgentCore blueprint and publish to AWS Marketplace for partner deployments.
