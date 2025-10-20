@@ -6,27 +6,26 @@ import { useEffect, useRef } from 'react';
 const metrics = [
   { label: 'Entity resolution accuracy', value: '95%' },
   { label: 'Opportunity detection lead time', value: '3-6 weeks' },
-  { label: 'Properties monitored', value: '108K'},
-  { label: 'Autonomous data collection', value: '24/7'}
+  { label: 'Properties monitored', value: '108K' },
 ];
 
 const capabilityCards = [
   {
     title: 'Create a Project',
     description:
-      '30 seconds to start. Track D.R. Horton acquisitions. Find assemblages forming. Research markets. Validate pricing. Pick your objective, execution happens automatically.',
-    hint: 'Six project types. Instant activation.',
+      'Launch in under a minute. Choose your objective, load market context, and the agent immediately begins the workflow.',
+    hint: 'Six project presets. Instant activation.',
   },
   {
     title: 'Agent Works 24/7',
     description:
-      'Monitors permits, sales, LLCs, and filings continuously. Links fragmented ownership records across databases. Reveals hidden patterns as they emerge.',
+      'Monitors permits, sales, and LLC filings continuously while reconciling fragmented ownership across every data source.',
     hint: 'Fully autonomous. Zero manual work.',
   },
   {
     title: 'Intelligence Stays Fresh',
     description:
-      'Dashboard updates when conditions change. Developer assembles parcels? Reflected immediately. Absorption accelerates? You see it. Always current, never outdated.',
+      'Dashboards refresh the moment markets shift so developer moves, absorption swings, and new comps appear instantly.',
     hint: 'Live updates. No refresh needed.',
   },
 ];
@@ -35,54 +34,62 @@ const signalHighlights = [
   {
     title: 'Assemblage Detection',
     stat: '5 parcels found',
-    description: 'Caught Infinity Development LLC buying five neighboring lots in SW Gainesville before anyone noticed. Connected permits, deeds, and LLC filings at 92% confidence. Flagged remaining acquisition opportunities.',
+    description:
+      'Detected Infinity Development LLC assembling five adjacent Gainesville parcels at 92% confidence and surfaced the remaining targets automatically.',
   },
   {
     title: 'Investment Scoring',
     stat: 'Auto-ranked 0-100',
     description:
-      'Properties scored the moment they surface. Homes 20% undervalued. Vacant lots zoned for development. Owners who held 20+ years. Automatically found, ranked, and explained.',
+      'Scores undervalued homes, entitled land, and long-hold owners as soon as they surface with clear reasoning for action.',
   },
   {
     title: 'Market Intelligence',
     stat: 'Live absorption',
     description:
-      'Know when to lowball and when to move fast. Tracks inventory, calculates absorption, classifies buyer vs seller markets. Professional metrics updated daily.',
+      'Tracks inventory and absorption in real time so you know when to move fast versus negotiate carefully with daily updates.',
   },
   {
     title: 'Ordinance Search',
     stat: '2,588 sections indexed',
-    description: 'Ask about setbacks in plain English. Get answers with citations in seconds. Every zoning code across Gainesville searchable instantly. No PDF hunting required.',
+    description:
+      'Answers zoning questions in plain English and returns cited sections instantly with no PDF digging required.',
   },
 ];
 
 const useCases = [
   {
     title: 'Track Competitors',
-    description: 'Monitor every property D.R. Horton acquires the moment it closes. Every permit filed. Every LLC formed. Understand their strategy before your competition does.'
+    description:
+      'Follow competitor acquisitions as soon as they close, correlate every permit and LLC, and understand the strategy before anyone else.',
   },
   {
     title: 'Find Off-Market Deals',
-    description: 'Surface motivated sellers before they list. Long-hold owners. High equity plays. Undervalued properties identified automatically from public records and ownership patterns.'
+    description:
+      'Surface motivated sellers before listings publish by combining hold periods, equity signals, and public record anomalies.',
   },
   {
     title: 'Validate Before Offering',
-    description: 'Stop overpaying. Pulls comps, calculates absorption, benchmarks against similar properties. Know true market value before making an offer.'
+    description:
+      'Generate comps, absorption metrics, and peer benchmarks in seconds so each offer is grounded in current market evidence.',
   },
 ];
 
 const techFoundation = [
   {
     title: 'Entity Resolution',
-    description: 'Matching owners across permits, sales, and LLCs is complex. Same company appearing as different names gets linked automatically with 95% accuracy. Fragments become ownership networks.'
+    description:
+      'Automatically unifies owners across permits, deeds, and LLC filings so fragmented records collapse into accurate relationship graphs.',
   },
   {
     title: 'Geospatial Intelligence',
-    description: 'Finding adjacent parcels requires spatial reasoning. PostGIS identifies assemblages, calculates distances, and flags when entities control neighboring properties. Geography becomes actionable data.'
+    description:
+      'Uses PostGIS to detect adjacent parcels, measure proximity, and flag when developers quietly assemble properties in a submarket.',
   },
   {
     title: 'Vector Search',
-    description: 'Zoning codes live in hundred-page PDFs. Every section indexed with embeddings for semantic search. Ask "what are the setback requirements" in plain English, get cited answers instantly.'
+    description:
+      'Indexes every ordinance section into a vector store so plain-language questions return cited answers without sifting lengthy PDFs.',
   },
 ];
 
@@ -92,28 +99,32 @@ const roadmapPhases = [
     status: 'Live Now',
     timeline: 'Current',
     title: 'Monitoring & Entity Intelligence',
-    description: `Continuous property monitoring. Identifies assemblages, resolves fragmented ownership, ranks investment opportunities.`,
+    description:
+      'Delivers continuous monitoring, catches early assemblages, and resolves messy ownership networks into ranked opportunity queues.',
   },
   {
     phase: 'Phase 2',
     status: 'In Development',
     timeline: 'Q1 2025',
     title: 'Financial Modeling & Valuation',
-    description: `Builds DCF models, calculates IRR/NPV, runs sensitivity analysis. Evaluates exit strategies and return projections.`,
+    description:
+      'Builds dynamic cash-flow models, evaluates IRR and NPV, and stress-tests exit strategies before capital is committed.',
   },
   {
     phase: 'Phase 3',
     status: 'Planned',
     timeline: 'Q2 2025',
     title: 'Predictive Analytics & Forecasting',
-    description: `Forecasts market movements 12-24 months ahead. Learns developer behavior patterns, predicts absorption rates, identifies leading indicators.`,
+    description:
+      'Learns developer behavior patterns, predicts absorption twelve to twenty four months ahead, and surfaces early indicators worth watching.',
   },
   {
     phase: 'Phase 4',
     status: 'Planned',
     timeline: 'Q3-Q4 2025',
     title: 'Autonomous Decision Intelligence',
-    description: `Delivers buy/hold/sell recommendations with confidence scores. Optimizes portfolios across submarkets and times market cycles.`,
+    description:
+      'Produces buy, hold, and sell guidance with traceable confidence and optimizes portfolios across markets in near real time.',
   },
 ];
 
@@ -185,17 +196,100 @@ export const Landing = () => {
 
         <div className="landing__workflow-visual landing__observe">
           <div className="landing__workflow-step">
-            <div className="landing__workflow-icon landing__workflow-icon--create">1</div>
+            <div className="landing__workflow-icon landing__workflow-icon--create">
+              <span className="landing__workflow-number">1</span>
+              <svg
+                className="landing__workflow-symbol"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path
+                  d="M9 3h6l1 2h3v15H5V5h3l1-2zm3 8v5m0-5-2 2m2-2 2 2"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
             <span className="landing__workflow-label">Create Project</span>
           </div>
-          <div className="landing__workflow-arrow">&rarr;</div>
+          <div className="landing__workflow-arrow" aria-hidden="true">
+            <span className="landing__workflow-arrow-line" />
+            <span className="landing__workflow-arrow-head" />
+          </div>
           <div className="landing__workflow-step">
-            <div className="landing__workflow-icon landing__workflow-icon--analyze">2</div>
+            <div className="landing__workflow-icon landing__workflow-icon--analyze">
+              <span className="landing__workflow-number">2</span>
+              <svg
+                className="landing__workflow-symbol"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <circle cx="11" cy="11" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                <line
+                  x1="14.5"
+                  y1="14.5"
+                  x2="19"
+                  y2="19"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
             <span className="landing__workflow-label">Agent Analyzes</span>
           </div>
-          <div className="landing__workflow-arrow">&rarr;</div>
+          <div className="landing__workflow-arrow" aria-hidden="true">
+            <span className="landing__workflow-arrow-line" />
+            <span className="landing__workflow-arrow-head" />
+          </div>
           <div className="landing__workflow-step">
-            <div className="landing__workflow-icon landing__workflow-icon--update">3</div>
+            <div className="landing__workflow-icon landing__workflow-icon--update">
+              <span className="landing__workflow-number">3</span>
+              <svg
+                className="landing__workflow-symbol"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path
+                  d="M6 9a6 6 0 0 1 10.2-4.2L18 7"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M18 15a6 6 0 0 1-10.2 4.2L6 17"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <polyline
+                  points="18 7 18 11 14 11"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <polyline
+                  points="6 17 6 13 10 13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
             <span className="landing__workflow-label">Continuous Updates</span>
           </div>
         </div>
@@ -279,27 +373,29 @@ export const Landing = () => {
       </section>
 
       <section className="landing__section landing__section--dark landing__observe">
-        <div className="landing__section-heading">
-          <p className="landing__eyebrow">Technical foundation</p>
-          <h2>Purpose-built for real estate intelligence.</h2>
+        <div className="landing__tech-intro">
+          <div className="landing__section-heading">
+            <p className="landing__eyebrow">Technical foundation</p>
+            <h2>Purpose-built for real estate intelligence.</h2>
+          </div>
+
+          <div className="landing__data-visual landing__observe">
+            <div className="landing__data-center">
+              <div className="landing__data-core">Agent</div>
+              <div className="landing__data-ring"></div>
+            </div>
+            <div className="landing__data-sources">
+              <div className="landing__data-node landing__data-node--1">Permits</div>
+              <div className="landing__data-node landing__data-node--2">Property Sales</div>
+              <div className="landing__data-node landing__data-node--3">LLC Filings</div>
+              <div className="landing__data-node landing__data-node--4">Ordinances</div>
+              <div className="landing__data-node landing__data-node--5">GIS Data</div>
+              <div className="landing__data-node landing__data-node--6">Ownership</div>
+            </div>
+          </div>
         </div>
 
-        <div className="landing__data-visual landing__observe">
-          <div className="landing__data-center">
-            <div className="landing__data-core">Agent</div>
-            <div className="landing__data-ring"></div>
-          </div>
-          <div className="landing__data-sources">
-            <div className="landing__data-node landing__data-node--1">Permits</div>
-            <div className="landing__data-node landing__data-node--2">Property Sales</div>
-            <div className="landing__data-node landing__data-node--3">LLC Filings</div>
-            <div className="landing__data-node landing__data-node--4">Ordinances</div>
-            <div className="landing__data-node landing__data-node--5">GIS Data</div>
-            <div className="landing__data-node landing__data-node--6">Ownership</div>
-          </div>
-        </div>
-
-        <div className="landing__grid">
+        <div className="landing__tech-grid">
           {techFoundation.map((tech) => (
             <article key={tech.title} className="landing__card landing__card--transparent">
               <h3>{tech.title}</h3>
