@@ -16,8 +16,8 @@ from aws_cdk import App, Environment, Tags
 from lib.dominion_aurora_stack import DominionAuroraStack
 from lib.dominion_lambda_stack import DominionLambdaStack
 from lib.dominion_agentcore_stack import DominionAgentCoreStack
+from lib.dominion_scraper_stack import DominionScraperStack
 # from lib.dominion_kb_stack import DominionKnowledgeBaseStack  # REMOVED: Using custom RAG instead
-# from lib.dominion_scraper_stack import DominionScraperStack  # TODO: Add after fixing Patchright/Crawl4AI
 
 # Get AWS account and region from environment or use defaults
 account = os.environ.get("CDK_DEFAULT_ACCOUNT", "872041712923")
@@ -58,8 +58,22 @@ agentcore_stack = DominionAgentCoreStack(
     description="Multi-agent system: Supervisor (Nova Premier) + 4 Specialists (Nova Lite)",
 )
 
+# Stack 4: Scraper Stack (Phase 5)
+# ECS Fargate tasks for automated data collection
+# Schedules: Daily (permits/sales), Weekly (entity enrichment), Quarterly (ordinances)
+# NOTE: Schedules are DISABLED by default (enable_schedules=False)
+# To enable scrapers, change to: enable_schedules=True
+scraper_stack = DominionScraperStack(
+    app,
+    "Dominion-Scraper",
+    aurora_stack=aurora_stack,  # Pass Aurora stack for DB access
+    enable_schedules=False,  # DISABLED - set to True when ready to run scrapers
+    env=env,
+    description="ECS Fargate scheduled tasks for data scraping (schedules disabled for hackathon demo)",
+)
+
 # Add common tags for hackathon tracking and AWS Application grouping
-for stack in [aurora_stack, lambda_stack, agentcore_stack]:
+for stack in [aurora_stack, lambda_stack, agentcore_stack, scraper_stack]:
     # AWS Application tag (groups resources in AWS Console)
     Tags.of(stack).add("awsApplication", "arn:aws:resource-groups:us-east-1:872041712923:group/Dominion/04ipu3hc6wg3jebw9lzqs2qrf1")
     # Project tags

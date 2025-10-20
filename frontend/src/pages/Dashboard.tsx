@@ -142,37 +142,21 @@ export const Dashboard = () => {
 
     const cachedState = loadCachedDashboardState(requestedProjectId);
     if (cachedState) {
+      // Found cached data - use it directly without trying to refresh from API
+      // Data comes from agent analysis stored in sessionStorage
       setState(cachedState);
       setLoading(false);
       setIntroProgress((prev) => (prev < 92 ? 92 : prev));
-    } else {
-      setState(null);
-      setLoading(true);
-      setIntroProgress(8);
+      console.log('[Dashboard] Using cached data, skipping API refresh');
+      return; // Don't try to fetch from API
     }
 
-    fetchDashboardState({ projectId: requestedProjectId, signal: controller.signal })
-      .then((data) => {
-        if (!isActive) {
-          return;
-        }
-        setState(data);
-        setError(null);
-      })
-      .catch((err) => {
-        if (!isActive && err.name === 'AbortError') {
-          return;
-        }
-        if (err.name !== 'AbortError') {
-          setError('Unable to load project report.');
-        }
-      })
-      .finally(() => {
-        if (isActive) {
-          setLoading(false);
-        }
-      })
-    ;
+    // No cached data - this shouldn't happen in normal flow
+    // User should create project first which populates sessionStorage
+    setState(null);
+    setLoading(false);
+    setError('No report found. Please create a new project first.');
+    console.warn('[Dashboard] No cached data found for project:', requestedProjectId);
 
     return () => {
       isActive = false;

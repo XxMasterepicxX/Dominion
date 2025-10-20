@@ -169,13 +169,11 @@ def lambda_handler(event, context):
         result = asyncio.run(invoke(payload, context))
 
         # Return Lambda Function URL response format
+        # CORS headers are handled by Function URL configuration in CDK
         return {
             'statusCode': 200,
             'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-                'Access-Control-Allow-Headers': '*',
+                'Content-Type': 'application/json'
             },
             'body': json.dumps(result)
         }

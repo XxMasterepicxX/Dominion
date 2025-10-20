@@ -37,7 +37,6 @@ SYSTEM_PROMPT = load_prompt()
 @tool
 def analyze_market_trends(
     city: str,
-    property_type: str = None,
     zoning: str = None,
     min_price: float = None,
     max_price: float = None,
@@ -45,6 +44,10 @@ def analyze_market_trends(
 ) -> dict:
     """
     Analyze market trends with multi-period time-series analysis.
+    
+    Returns trends for ALL property types grouped together (SINGLE FAMILY, 
+    CONDOMINIUM, MOBILE HOME, etc.). You get all types in one call - no need 
+    to filter by property_type.
 
     Returns: 12m/6m/3m/1m trends, absorption rate, market classification,
     velocity, insights, recommendations.
@@ -53,7 +56,6 @@ def analyze_market_trends(
         'tool': 'analyze_market_trends',
         'parameters': {
             'city': city,
-            'property_type': property_type,
             'zoning': zoning,
             'min_price': min_price,
             'max_price': max_price,
@@ -208,4 +210,25 @@ def invoke(task: str, session_id: str = None) -> str:
 
     result = market_agent(task)
     logger.info("Market Specialist completed", session_id=session_id)
-    return result.message if hasattr(result, 'message') else str(result)
+
+    # Convert AgentResult to dict
+    if hasattr(result, 'model_dump'):
+        result_dict = result.model_dump()
+    elif hasattr(result, 'to_dict'):
+        result_dict = result.to_dict()
+    elif hasattr(result, 'dict'):
+        result_dict = result.dict()
+    elif isinstance(result, dict):
+        result_dict = result
+    else:
+        result_dict = dict(result) if hasattr(result, '__iter__') else {'message': str(result)}
+
+    # Extract text from dict structure
+    if 'content' in result_dict:
+        content = result_dict['content']
+        if isinstance(content, list) and len(content) > 0 and isinstance(content[0], dict) and 'text' in content[0]:
+            return content[0]['text']
+        return str(content)
+    elif 'message' in result_dict:
+        return result_dict['message']
+    return str(result_dict)

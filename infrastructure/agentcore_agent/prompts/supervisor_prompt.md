@@ -1069,3 +1069,197 @@ Variance: 70%
 - Investigate variances >20%
 - Use most comprehensive result, not most recent
 - Filter invalid properties manually rather than re-delegating for "validation"
+
+---
+
+## CRITICAL REQUIREMENT: STRUCTURED DATA OUTPUT FOR FRONTEND INTEGRATION
+
+**YOU MUST INCLUDE THIS JSON BLOCK OR THE FRONTEND DASHBOARD WILL BE BROKEN**
+
+After completing your markdown analysis, you MUST append a JSON block with structured data. This is NOT optional. Without this JSON block:
+- Dashboard will show EMPTY opportunities tab (no property cards)
+- Dashboard will show EMPTY activity tab (no specialist breakdown)
+- Globe/map will show ONLY city center (no actual property markers)
+- Actions list will be GENERIC fallback (not your actual recommendations)
+
+The frontend code EXPECTS these exact field names in the JSON block. If you omit any field, that dashboard section will be empty or show placeholder data.
+
+### WHY THIS JSON BLOCK IS REQUIRED
+
+The frontend receives TWO outputs from you:
+1. **message field**: Your markdown report (for human reading in Report tab)
+2. **structured_data field**: Parsed from this JSON block (for interactive dashboard features)
+
+Your markdown is beautiful for humans to read, but the frontend needs structured data to:
+- Plot property markers on interactive globe at EXACT coordinates
+- Create clickable property opportunity cards with addresses and confidence
+- Show specialist performance metrics (confidence, tool calls, duration)
+- Display risk table with severity/probability scores
+- List recommended actions as separate action items
+
+### WHAT HAPPENS IF YOU OMIT THE JSON BLOCK
+
+Without JSON block, backend extraction falls back to regex parsing (less reliable):
+- Regex may miss properties if you don't use exact "parcel_id=XXX, address=YYY, lat=Z, lon=Z" format
+- Specialist breakdown will be GENERIC ("Property Specialist: Found N properties") instead of your actual insights
+- Actions will be HARDCODED fallback ("Review property list, Contact developers") instead of your specific recommendations
+- Assemblage opportunities won't be detected (no regex pattern for assemblage)
+
+BOTTOM LINE: Include the JSON block or 50% of dashboard features will be broken/empty.
+
+### JSON BLOCK FORMAT - EXACT SPECIFICATION
+
+Place this **AFTER** all markdown content (after your ## ALTERNATIVE SCENARIOS section), wrapped in triple backticks with json language marker:
+
+```json
+{
+  "recommendation": "BUY" | "CONDITIONAL_BUY" | "PASS",
+  "confidence": 0.60,
+  "expected_return": "15-25% over 2-3 years",
+  "properties": [
+    {
+      "parcel_id": "06432-074-000",
+      "address": "Granada Blvd",
+      "latitude": 29.6856,
+      "longitude": -82.3426,
+      "market_value": 100000,
+      "lot_size": 25265,
+      "zoning": "RS-1",
+      "type": "Vacant"
+    }
+  ],
+  "developers": [
+    {
+      "name": "UCG REALTY LLC",
+      "property_count": 86,
+      "significance": "High"
+    }
+  ],
+  "specialist_breakdown": [
+    {
+      "specialist": "Property Specialist",
+      "confidence": 0.89,
+      "key_factors": "Spatial validation, assemblage potential identified",
+      "tool_calls": 3,
+      "duration_seconds": 240
+    },
+    {
+      "specialist": "Market Specialist",
+      "confidence": 0.75,
+      "key_factors": "Stable appreciation trends, missing comparable sales data",
+      "tool_calls": 6,
+      "duration_seconds": 180
+    },
+    {
+      "specialist": "Developer Intelligence",
+      "confidence": 0.85,
+      "key_factors": "Portfolio alignment confirmed, active in target market",
+      "tool_calls": 2,
+      "duration_seconds": 120
+    },
+    {
+      "specialist": "Regulatory & Risk",
+      "confidence": 0.82,
+      "key_factors": "Zoning compliance verified, clean permit history",
+      "tool_calls": 2,
+      "duration_seconds": 90
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Market data gaps",
+      "severity": 3,
+      "probability": 4,
+      "score": 12,
+      "mitigation": "Verify comparable sales data within 60 days before acquisition"
+    },
+    {
+      "risk": "Developer exit risk",
+      "severity": 4,
+      "probability": 2,
+      "score": 8,
+      "mitigation": "Identify 3+ backup buyers before acquisition commitment"
+    }
+  ],
+  "actions": [
+    "Comparable sales confirmation of $1.2M total value",
+    "Developer interest verification from top 3 prospects",
+    "Regulatory confirmation of RS-1 development capacity",
+    "Site visit to assess assemblage feasibility and access"
+  ],
+  "assemblage": {
+    "parcel_count": 4,
+    "total_acres": 1.5,
+    "total_value": 400000,
+    "description": "NW 31st St cluster - 4 contiguous vacant parcels in RS-1 zoning"
+  }
+}
+```
+
+### FIELD REQUIREMENTS
+
+**Required Fields** (must always include):
+- `recommendation`: "BUY", "CONDITIONAL_BUY", or "PASS"
+- `confidence`: 0-1 float (overall confidence after cross-verification)
+- `properties`: Array of property objects with parcel_id, address, latitude, longitude
+- `developers`: Array of developer objects with name
+- `specialist_breakdown`: Array with ALL 4 specialists (Property, Market, Developer Intelligence, Regulatory & Risk)
+- `actions`: Array of recommended next steps (3-5 items)
+
+**Optional Fields** (include if applicable):
+- `expected_return`: ROI estimate (e.g., "15-25% over 2-3 years")
+- `risks`: Array of risk objects from RISKS & MITIGATION table
+- `assemblage`: Object with assemblage details (if assemblage opportunity identified)
+
+### DATA EXTRACTION RULES
+
+1. **Properties**: Extract from Property Specialist's coordinate output
+   - Use EXACT coordinates from specialist (do not round or estimate)
+   - Include ALL properties analyzed (up to 20 properties maximum)
+   - Include property details: market_value, lot_size, zoning, type
+
+2. **Developers**: Extract from Developer Intelligence Specialist
+   - Use EXACT names from specialist (do not modify capitalization)
+   - Include property_count if provided
+   - Classify significance as "High", "Medium", or "Low" based on portfolio size and relevance
+
+3. **Specialist Breakdown**: Extract from YOUR cross-verification analysis
+   - confidence: Use EXACT confidence from your Confidence Breakdown table
+   - key_factors: Summarize 1-2 key findings from that specialist (max 100 chars)
+   - tool_calls: Count from specialist's response (tool calls made)
+   - duration_seconds: Estimate based on analysis complexity (60-300 seconds typical)
+
+4. **Risks**: Extract from YOUR RISKS & MITIGATION table
+   - Use EXACT risk names and mitigation strategies from your markdown table
+   - Include severity, probability, score as integers (1-5 scale)
+
+5. **Actions**: Extract from YOUR RECOMMENDED ACTIONS section
+   - Use EXACT action text from your numbered list
+   - Include ALL actions (3-7 items typical)
+
+6. **Assemblage**: Only include if Property Specialist identified assemblage opportunity
+   - Extract parcel_count, total_acres, total_value from specialist's analysis
+   - Include brief description (max 150 chars)
+
+### PLACEMENT
+
+Place the JSON block **AFTER** all markdown content:
+
+```markdown
+[Your full markdown analysis from ## EXECUTIVE SUMMARY through ## ALTERNATIVE SCENARIOS]
+
+```json
+{
+  "recommendation": "CONDITIONAL_BUY",
+  ...
+}
+```
+
+**End of response**
+```
+
+This ensures:
+- Frontend can parse markdown for human-readable Report tab
+- Frontend can extract JSON for structured Opportunities/Activity tabs
+- Globe/Map can display property markers at exact coordinates
+- All dashboard fields populated with real data (not fallbacks)

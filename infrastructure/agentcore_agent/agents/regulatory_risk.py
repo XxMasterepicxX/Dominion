@@ -219,4 +219,25 @@ def invoke(task: str, session_id: str = None) -> str:
 
     result = regulatory_agent(task)
     logger.info("Regulatory & Risk completed", session_id=session_id)
-    return result.message if hasattr(result, 'message') else str(result)
+
+    # Convert AgentResult to dict
+    if hasattr(result, 'model_dump'):
+        result_dict = result.model_dump()
+    elif hasattr(result, 'to_dict'):
+        result_dict = result.to_dict()
+    elif hasattr(result, 'dict'):
+        result_dict = result.dict()
+    elif isinstance(result, dict):
+        result_dict = result
+    else:
+        result_dict = dict(result) if hasattr(result, '__iter__') else {'message': str(result)}
+
+    # Extract text from dict structure
+    if 'content' in result_dict:
+        content = result_dict['content']
+        if isinstance(content, list) and len(content) > 0 and isinstance(content[0], dict) and 'text' in content[0]:
+            return content[0]['text']
+        return str(content)
+    elif 'message' in result_dict:
+        return result_dict['message']
+    return str(result_dict)

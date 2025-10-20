@@ -97,6 +97,45 @@ Word count estimate: [count words in draft]
 
 **Industry Standard (2025 Research):** MAX_RETRIES = 3 for any tool
 
+### MAX_RETRIES for analyze_market_trends
+
+**BEFORE EVERY analyze_market_trends CALL, verify in thinking block:**
+
+```
+<thinking>
+How many analyze_market_trends calls have I made so far? [COUNT YOUR CALLS]
+- If COUNT >= 3: STOP. I cannot make more calls. Use data I already have.
+- If COUNT < 3: PROCEED to call analyze_market_trends.
+
+What am I about to call?
+- Tool: analyze_market_trends
+- Parameters: city=[city], max_price=[price], time_period_months=[months]
+- Why: [reason for this call]
+- Expected outcome: [what data I need]
+</thinking>
+```
+
+**MAXIMUM:** 3 analyze_market_trends calls total
+
+**WHY:** One call returns ALL property types. If you need price segmentation, 
+you should have at most 3 calls:
+1. Overall market (no price filter)
+2. Lower price tier (max_price=X)
+3. Upper price tier (min_price=X+1)
+
+**IF EMPTY RESULTS:**
+- Empty results likely mean: no properties match your filters (price too low/high)
+- Do NOT retry with same parameters
+- Try broader price range OR remove filters
+- After 3 attempts: Report findings with data limitations
+
+**IF ALL 3 CALLS RETURN EMPTY:**
+- Report: "No properties found matching criteria - filters may be too restrictive"
+- Recommend: "Expand price range, remove filters, or try different location"
+- Do NOT keep retrying
+
+### MAX_RETRIES for find_comparable_properties
+
 **BEFORE EVERY find_comparable_properties CALL, verify in thinking block:**
 
 ```
@@ -292,11 +331,15 @@ Replace these with actual values from your specific market context when making t
 - When you need developer activity (use Developer Intelligence tools)
 
 **Parameters:**
-- `property_type`: Specific type (RESIDENTIAL, COMMERCIAL, VACANT) or leave blank for all
-- `city`: City name
+- `city`: City name (required)
 - `zoning`: Optional zoning filter
-- `min_price`, `max_price`: Price range
+- `min_price`, `max_price`: Price range filters
 - `time_period_months`: How far back to analyze (default 12)
+
+**IMPORTANT:** This tool returns trends for ALL property types in one call 
+(SINGLE FAMILY, CONDOMINIUM, MOBILE HOME, VACANT, COMMERCIAL, etc.). The results 
+are automatically grouped by property_type. You don't need to call this multiple 
+times for different types - one call gives you everything!
 
 **CRITICAL:** This tool already returns INSIGHTS and RECOMMENDATIONS. You don't just pass raw numbers - you interpret them.
 
@@ -480,24 +523,16 @@ Example with high variability:
 ```
 analyze_market_trends(city=<city_name>)
 ```
-**What to analyze:**
+**What you get automatically:**
+- Trends for ALL property types (SINGLE FAMILY, CONDOMINIUM, MOBILE HOME, etc.)
+- Results grouped by property_type
+- Sales counts, prices, absorption rates for each type
 - How many sales in last 12m? (sample size)
 - What's the absorption rate? (buyer's vs seller's market)
 - What's the trend direction? (accelerating vs decelerating)
 - Which property types dominate sales?
 
-**Step 2: Segment by Property Type**
-```
-analyze_market_trends(city=<city_name>, property_type="RESIDENTIAL")
-analyze_market_trends(city=<city_name>, property_type="COMMERCIAL")
-analyze_market_trends(city=<city_name>, property_type="VACANT")
-```
-**What to analyze:**
-- Which type has highest velocity?
-- Which type has best price appreciation?
-- Which type has most favorable absorption rate?
-
-**Step 3: Segment by Price Range**
+**Step 2: Segment by Price Range**
 ```
 analyze_market_trends(city=<city_name>, max_price=<lower_tier_max>)
 analyze_market_trends(city=<city_name>, min_price=<lower_tier_max>+1, max_price=<mid_tier_max>)
@@ -507,6 +542,7 @@ analyze_market_trends(city=<city_name>, min_price=<mid_tier_max>+1)
 - Where is demand strongest? (by price tier)
 - Where is supply constrained? (high absorption)
 - Where is competition weakest? (for buyer)
+- Compare property types within each price tier
 
 ### Phase 2: ANALYZE TRENDS
 

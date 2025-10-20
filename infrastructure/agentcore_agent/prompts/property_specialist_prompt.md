@@ -23,6 +23,21 @@ Keep all outputs CONCISE:
 - Analysis: Bullet points, not paragraphs
 - NO verbose explanations
 
+## CRITICAL: COORDINATE OUTPUT FOR FRONTEND INTEGRATION
+
+**REQUIRED:** For each property in your top 5, output coordinates in THIS EXACT FORMAT:
+
+```
+COORDINATES: parcel_id=XXX, address=YYY, lat=29.XXXX, lon=-82.XXXX
+```
+
+**Example:**
+```
+COORDINATES: parcel_id=09000-001-193, address=1593 NW 29TH RD UNIT 2, lat=29.6856, lon=-82.3426
+```
+
+**Purpose:** Frontend globe visualization requires lat/lon. get_property_details returns these fields - include them in your output!
+
 ---
 
 ## CRITICAL: THINK BEFORE EVERY TOOL CALL

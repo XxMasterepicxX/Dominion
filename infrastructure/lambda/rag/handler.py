@@ -1,11 +1,11 @@
 """
-RAG Lambda Function Handler - FIXED VERSION
+RAG Lambda Function Handler - BGE EMBEDDINGS
 
 Handles 1 tool:
 - search_ordinances - Search Florida municipal ordinances using pgvector
 
-Uses pgvector DIRECTLY (embeddings already in Aurora: ordinance_embeddings table).
-No Bedrock Knowledge Base required!
+Uses pgvector DIRECTLY with BAAI/bge-large-en-v1.5 embeddings (1024-dim).
+Embeddings stored in Aurora: ordinance_embeddings table.
 """
 
 import json
@@ -15,8 +15,7 @@ from typing import Dict, Any, List
 import boto3
 from botocore.exceptions import ClientError
 
-# Initialize clients
-bedrock_runtime = boto3.client('bedrock-runtime', region_name='us-east-1')
+# Initialize AWS clients
 rds_data = boto3.client('rds-data', region_name='us-east-1')
 
 # Environment variables
@@ -24,43 +23,114 @@ CLUSTER_ARN = os.environ.get('CLUSTER_ARN')
 SECRET_ARN = os.environ.get('SECRET_ARN')
 DATABASE_NAME = os.environ.get('DATABASE_NAME', 'dominion_db')
 
-# Embedding model (use Amazon Titan for consistency)
-EMBEDDING_MODEL_ID = 'amazon.titan-embed-text-v2:0'
+# Embedding model configuration (BAAI BGE-large-en-v1.5)
+EMBEDDING_MODEL_NAME = 'BAAI/bge-large-en-v1.5'
+EMBEDDING_DIMENSIONS = 1024
+
+# Query instruction for BAAI/bge models (from src/services/embedding_service.py)
+# Required for search queries to match the embedding generation used during indexing
+QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
+
+# Global model instance (loaded once per container lifecycle)
+_embedding_model = None
 
 # Simple in-memory cache to detect loops (Lambda container reuse)
 query_history = {}
 
 
-def generate_embedding(text: str) -> List[float]:
-    """Generate embedding vector for search query using Bedrock."""
-    try:
-        print(f"Generating embedding for query: {text[:100]}...")
+def get_embedding_model():
+    """
+    Lazy-load sentence-transformers model.
 
-        response = bedrock_runtime.invoke_model(
-            modelId=EMBEDDING_MODEL_ID,
-            contentType='application/json',
-            accept='application/json',
-            body=json.dumps({
-                'inputText': text,
-                'dimensions': 1024,
-                'normalize': True
-            })
+    Downloads model to /tmp on first invocation (cold start ~10-15 seconds).
+    Subsequent invocations reuse the loaded model (warm start ~50ms).
+
+    Best practices applied:
+    - normalize_embeddings=True (required for cosine similarity)
+    - device='cpu' (Lambda has no GPU)
+    - Cache in /tmp (10GB available)
+    """
+    global _embedding_model
+
+    if _embedding_model is None:
+        print(f"Loading embedding model: {EMBEDDING_MODEL_NAME}")
+        print("This is a cold start - downloading model to /tmp (one-time ~15 sec)")
+
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            # Set cache directory to /tmp (Lambda has 10GB available)
+            os.environ['TRANSFORMERS_CACHE'] = '/tmp/transformers_cache'
+            os.environ['SENTENCE_TRANSFORMERS_HOME'] = '/tmp/sentence_transformers'
+
+            # Load model on CPU with normalization enabled
+            _embedding_model = SentenceTransformer(
+                EMBEDDING_MODEL_NAME,
+                device='cpu',
+                cache_folder='/tmp/sentence_transformers'
+            )
+
+            print(f"Model loaded successfully: {EMBEDDING_MODEL_NAME}")
+            print(f"Model max_seq_length: {_embedding_model.max_seq_length}")
+
+        except Exception as e:
+            print(f"Failed to load embedding model: {str(e)}")
+            raise RuntimeError(f"Embedding model initialization failed: {str(e)}")
+
+    return _embedding_model
+
+
+def generate_embedding(text: str, is_query: bool = True) -> List[float]:
+    """
+    Generate embedding vector for search query using BGE.
+
+    Uses BAAI/bge-large-en-v1.5 matching src/services/embedding_service.py:
+    - normalize_embeddings=True (cosine similarity)
+    - convert_to_numpy=True (faster processing)
+    - Query instruction for queries (NOT for documents)
+
+    Args:
+        text: Text to embed
+        is_query: If True, adds query instruction prefix (default: True for search)
+
+    Returns:
+        List[float]: 1024-dimensional embedding vector
+    """
+    try:
+        # Add query instruction for search queries (matches src implementation)
+        text_to_embed = QUERY_INSTRUCTION + text if is_query else text
+
+        print(f"Generating BGE embedding for query: {text[:100]}...")
+        print(f"With instruction: {is_query}")
+
+        # Get model instance (lazy-loaded)
+        model = get_embedding_model()
+
+        # Generate embedding (matches src/services/embedding_service.py)
+        embedding = model.encode(
+            text_to_embed,
+            normalize_embeddings=True,  # Required for cosine similarity
+            convert_to_numpy=True,      # Faster than torch tensors
+            show_progress_bar=False     # No progress bar in Lambda
         )
 
-        result = json.loads(response['body'].read())
-        embedding = result.get('embedding')
+        # Convert numpy array to list for JSON serialization
+        embedding_list = embedding.tolist()
 
-        if not embedding:
-            raise ValueError("No embedding returned from Bedrock")
+        # Validate dimensions
+        if len(embedding_list) != EMBEDDING_DIMENSIONS:
+            raise ValueError(
+                f"Invalid embedding dimensions: {len(embedding_list)}, "
+                f"expected {EMBEDDING_DIMENSIONS}"
+            )
 
-        if len(embedding) != 1024:
-            raise ValueError(f"Invalid embedding dimensions: {len(embedding)}, expected 1024")
-
-        print(f"Embedding generated successfully: {len(embedding)} dimensions")
-        return embedding
+        print(f"BGE embedding generated: {len(embedding_list)} dimensions")
+        return embedding_list
 
     except Exception as e:
         print(f"Embedding generation error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise
 
 

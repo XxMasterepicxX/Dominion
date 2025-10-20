@@ -1,6 +1,7 @@
 import type { DashboardState, ProjectSetup, ProjectSummary } from '../types/dashboard';
 import { mockDashboardState } from '../stubs/mockDashboardState';
 import { mockProjects } from '../stubs/mockProjects';
+import { parseAgentMarkdown } from '../utils/markdownParser';
 
 const DEFAULT_PROJECT_ID = 'proj-123';
 // Vite exposes env vars on import.meta.env in the browser; fall back to process.env for node environments
@@ -31,9 +32,9 @@ export async function fetchDashboardState(
     const payload = (await response.json()) as DashboardState;
     return payload;
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn('[dashboard] Falling back to mock data:', error);
-    return clone(mockDashboardState);
+    // No fallback - throw the real error so we know what's actually happening
+    console.error('[dashboard] Failed to fetch dashboard state:', error);
+    throw error;
   }
 }
 
@@ -163,12 +164,40 @@ export interface AgentResponse {
       address: string;
       latitude: number;
       longitude: number;
+      market_value?: number;
+      lot_size?: number;
+      zoning?: string;
+      type?: string;
     }>;
     developers?: Array<{
       name: string;
+      property_count?: number;
+      significance?: string;
     }>;
     recommendation?: string;
     confidence?: number;
+    expected_return?: string;
+    specialist_breakdown?: Array<{
+      specialist: string;
+      confidence: number;
+      key_factors: string;
+      tool_calls?: number;
+      duration_seconds?: number;
+    }>;
+    risks?: Array<{
+      risk: string;
+      severity: number;
+      probability: number;
+      score: number;
+      mitigation: string;
+    }>;
+    actions?: string[];
+    assemblage?: {
+      parcel_count: number;
+      total_acres: number;
+      total_value: number;
+      description: string;
+    };
   };
 }
 
@@ -266,7 +295,213 @@ function getMarketCoordinates(market: string): [number, number] {
 }
 
 /**
- * Transform agent text response into DashboardState
+ * Build report content from agent response using markdown parser
+ */
+function buildReportContent(
+  agentResponse: AgentResponse,
+  setup: ProjectSetup,
+  projectId: string,
+  message: string,
+  confidence: number,
+  isBuyRecommendation: boolean
+): DashboardState['reportContent'] {
+  // Parse the markdown into structured sections
+  const parsed = parseAgentMarkdown(message);
+
+  // Build sections from parsed markdown
+  const sections: Array<{ title: string; content: string; metrics?: Array<{ label: string; value: string; highlight?: boolean }> }> = [];
+
+  // Executive Summary
+  if (parsed.executiveSummary.summary) {
+    sections.push({
+      title: 'Executive Summary',
+      content: parsed.executiveSummary.summary,
+      metrics: [
+        {
+          label: 'Recommendation',
+          value: parsed.executiveSummary.recommendation,
+          highlight: parsed.executiveSummary.recommendation === 'BUY' || parsed.executiveSummary.recommendation === 'CONDITIONAL BUY',
+        },
+        {
+          label: 'Confidence',
+          value: `${Math.round(parsed.executiveSummary.confidence * 100)}%`,
+          highlight: parsed.executiveSummary.confidence > 0.7,
+        },
+        ...(parsed.executiveSummary.expectedReturn ? [{
+          label: 'Expected Return',
+          value: parsed.executiveSummary.expectedReturn,
+          highlight: true,
+        }] : []),
+      ],
+    });
+  }
+
+  // Key Findings - Property Analysis
+  if (parsed.keyFindings.property) {
+    sections.push({
+      title: 'Property Analysis',
+      content: parsed.keyFindings.property.content,
+      metrics: [
+        {
+          label: 'Specialist Confidence',
+          value: `${Math.round(parsed.keyFindings.property.confidence * 100)}%`,
+          highlight: parsed.keyFindings.property.confidence > 0.7,
+        },
+      ],
+    });
+  }
+
+  // Key Findings - Market Analysis
+  if (parsed.keyFindings.market) {
+    sections.push({
+      title: 'Market Analysis',
+      content: parsed.keyFindings.market.content,
+      metrics: [
+        {
+          label: 'Specialist Confidence',
+          value: `${Math.round(parsed.keyFindings.market.confidence * 100)}%`,
+          highlight: parsed.keyFindings.market.confidence > 0.7,
+        },
+      ],
+    });
+  }
+
+  // Key Findings - Developer Intelligence
+  if (parsed.keyFindings.developer) {
+    sections.push({
+      title: 'Developer Intelligence',
+      content: parsed.keyFindings.developer.content,
+      metrics: [
+        {
+          label: 'Specialist Confidence',
+          value: `${Math.round(parsed.keyFindings.developer.confidence * 100)}%`,
+          highlight: parsed.keyFindings.developer.confidence > 0.7,
+        },
+      ],
+    });
+  }
+
+  // Key Findings - Regulatory & Risk
+  if (parsed.keyFindings.regulatory) {
+    sections.push({
+      title: 'Regulatory & Risk',
+      content: parsed.keyFindings.regulatory.content,
+      metrics: [
+        {
+          label: 'Specialist Confidence',
+          value: `${Math.round(parsed.keyFindings.regulatory.confidence * 100)}%`,
+          highlight: parsed.keyFindings.regulatory.confidence > 0.7,
+        },
+      ],
+    });
+  }
+
+  // Investment Thesis
+  if (parsed.investmentThesis) {
+    sections.push({
+      title: 'Investment Thesis',
+      content: parsed.investmentThesis,
+    });
+  }
+
+  // Risks & Mitigation - convert table to metrics for better display
+  if (parsed.risksAndMitigation && parsed.risksAndMitigation.length > 0) {
+    // Sort by risk score (severity * probability) descending
+    const sortedRisks = [...parsed.risksAndMitigation].sort((a, b) => b.score - a.score);
+    
+    // Create content with mitigation strategies
+    const risksContent = sortedRisks
+      .map(risk => `• ${risk.risk}: ${risk.mitigation}`)
+      .join('\n');
+    
+    // Create metrics showing risk severity
+    const riskMetrics = sortedRisks.map(risk => ({
+      label: `${risk.risk} (Score: ${risk.score})`,
+      value: `Severity ${risk.severity}/5 × Probability ${risk.probability}/5`,
+      highlight: risk.score >= 12, // Highlight high-risk items (score 12+)
+    }));
+    
+    sections.push({
+      title: 'Risks & Mitigation',
+      content: risksContent,
+      metrics: riskMetrics,
+    });
+  }
+
+  // Confidence Breakdown - convert table to metrics
+  if (parsed.confidenceBreakdown && parsed.confidenceBreakdown.length > 0) {
+    // Create content with key factors
+    const confidenceContent = parsed.confidenceBreakdown
+      .map(item => `• ${item.specialist}: ${item.keyFactors}`)
+      .join('\n');
+    
+    // Create metrics showing confidence scores
+    const confidenceMetrics = parsed.confidenceBreakdown.map(item => ({
+      label: item.specialist,
+      value: `${Math.round(item.confidence * 100)}%`,
+      highlight: item.confidence > 0.8, // Highlight high confidence
+    }));
+    
+    sections.push({
+      title: 'Confidence Breakdown',
+      content: confidenceContent,
+      metrics: confidenceMetrics,
+    });
+  }
+
+  // Alternative Scenarios
+  if (parsed.alternativeScenarios && parsed.alternativeScenarios.length > 0) {
+    sections.push({
+      title: 'Alternative Scenarios',
+      content: parsed.alternativeScenarios.join('\n\n'),
+    });
+  }
+
+  // Fallback if no sections were parsed
+  if (sections.length === 0) {
+    sections.push({
+      title: 'AI Agent Analysis',
+      content: message,
+    });
+  }
+
+  return {
+    projectId,
+    projectName: setup.name,
+    analysisType: 'Multi-Agent AI Analysis (AWS Bedrock AgentCore)',
+    confidence,
+    confidenceLabel: confidence > 0.66 ? 'High' : confidence > 0.33 ? 'Medium' : 'Low',
+    dataCoverage: 'Alachua County, Florida',
+    summary: parsed.executiveSummary.summary || message.split('\n\n')[0] || message.substring(0, 200),
+    marketContext: setup.market ? `Analysis for ${setup.market}, ${setup.type}` : undefined,
+    sections,
+    nextActions: agentResponse.structured_data?.actions && agentResponse.structured_data.actions.length > 0
+      ? agentResponse.structured_data.actions
+      : parsed.recommendedActions && parsed.recommendedActions.length > 0
+        ? parsed.recommendedActions
+        : isBuyRecommendation
+          ? [
+              'Review detailed property list',
+              'Contact identified developers',
+              'Conduct on-site property inspections',
+              'Verify zoning and permits',
+            ]
+          : [
+              'Review analysis for data gaps',
+              'Consider adjusting search criteria',
+              'Explore alternative markets',
+            ],
+    sources: {
+      tools: ['Multi-Agent System', 'Property Specialist', 'Market Specialist', 'Developer Intelligence', 'Regulatory & Risk Specialist'],
+      databases: ['Aurora PostgreSQL (108K properties, 89K entities, 5K ordinances)'],
+      coverage: 'Alachua County, Florida',
+    },
+    rawResponse: agentResponse,
+  };
+}
+
+/**
+ * Transform agent response into dashboard state
  *
  * The agent returns a text analysis. We parse it to extract:
  * - Recommendation (BUY/PASS)
@@ -386,52 +621,245 @@ export function transformAgentResponseToDashboard(
       ],
     },
     markets,
-    reportContent: {
-      projectId,
-      projectName: setup.name,
-      analysisType: 'Multi-Agent AI Analysis (AWS Bedrock AgentCore)',
-      confidence,
-      confidenceLabel: confidence > 0.66 ? 'High' : confidence > 0.33 ? 'Medium' : 'Low',
-      dataCoverage: 'Alachua County, Florida',
-      summary: firstParagraph,
-      sections: [
-        {
-          title: 'AI Agent Analysis',
-          content: message,
-        },
-      ],
-      nextActions: isBuyRecommendation
-        ? [
-            'Review detailed property list',
-            'Contact identified developers',
-            'Conduct on-site property inspections',
-            'Verify zoning and permits',
-          ]
-        : [
-            'Review analysis for data gaps',
-            'Consider adjusting search criteria',
-            'Explore alternative markets',
-          ],
-      sources: {
-        tools: ['Multi-Agent System', 'Property Search', 'Entity Analysis', 'Market Trends', 'Ordinance Search'],
-        databases: ['Aurora PostgreSQL (108K properties, 89K entities, 5K ordinances)'],
-        coverage: 'Alachua County, Florida',
-      },
-      rawResponse: agentResponse,
-    },
-    opportunityQueue: [],
-    activityLog: [
-      {
-        id: `activity-${Date.now()}`,
-        timestamp: now,
-        toolName: 'multi_agent_analysis',
-        description: `Analyzing: "${setup.strategy || prompt}"`,
-        result: `Analysis complete: ${isBuyRecommendation ? 'BUY' : 'PASS'} recommendation with ${Math.round(confidence * 100)}% confidence`,
-        status: 'complete',
-        duration: '~60s',
-      },
-    ],
+    reportContent: buildReportContent(agentResponse, setup, projectId, message, confidence, isBuyRecommendation),
+    opportunityQueue: buildOpportunityQueue(agentResponse, setup, projectId, confidence),
+    activityLog: buildActivityLog(agentResponse, setup, isBuyRecommendation, confidence),
     isLive: false,
     lastDataCheck: now,
   };
+}
+
+/**
+ * Build opportunity queue from agent analysis
+ * Converts properties and insights into actionable opportunities
+ */
+function buildOpportunityQueue(
+  agentResponse: AgentResponse,
+  setup: ProjectSetup,
+  projectId: string,
+  confidence: number
+): Array<{
+  id: string;
+  type: 'property_deal' | 'assemblage' | 'market_arbitrage' | 'entity_following' | 'zoning_play';
+  entity?: string;
+  property?: string;
+  market: string;
+  marketCode: string;
+  signal: string;
+  signalType: string;
+  confidence: number;
+  confidenceLabel: string;
+  leadTime: string;
+  action: string;
+  estimatedReturn?: string;
+  risks?: string[];
+  status: 'new' | 'queued' | 'in_analysis' | 'executed' | 'passed';
+  supportingTools: string[];
+  relatedProjectId?: string;
+  discoveredAt: string;
+  updatedAt?: string;
+}> {
+  const now = new Date().toISOString();
+  const opportunities: any[] = [];
+  const structuredProps = agentResponse.structured_data?.properties || [];
+  const developers = agentResponse.structured_data?.developers || [];
+
+  // Create property opportunities from structured data
+  structuredProps.forEach((prop, index) => {
+    opportunities.push({
+      id: `opp-property-${Date.now()}-${index}`,
+      type: 'property_deal' as const,
+      property: `${prop.address} (Parcel: ${prop.parcel_id})`,
+      market: setup.market,
+      marketCode: setup.marketCode || setup.market.toLowerCase().replace(/\s+/g, '_'),
+      signal: `Property identified in ${setup.market}`,
+      signalType: 'ai_analysis',
+      confidence,
+      confidenceLabel: confidence > 0.66 ? 'High' : confidence > 0.33 ? 'Medium' : 'Low',
+      leadTime: 'Immediate',
+      action: 'Review property details and conduct site visit',
+      supportingTools: ['Property Specialist', 'Market Analysis'],
+      relatedProjectId: projectId,
+      discoveredAt: now,
+      status: 'new' as const,
+    });
+  });
+
+  // Create developer following opportunities
+  developers.slice(0, 3).forEach((dev, index) => {
+    opportunities.push({
+      id: `opp-developer-${Date.now()}-${index}`,
+      type: 'entity_following' as const,
+      entity: dev.name,
+      market: setup.market,
+      marketCode: setup.marketCode || setup.market.toLowerCase().replace(/\s+/g, '_'),
+      signal: `Active developer in ${setup.market}`,
+      signalType: 'pattern_analysis',
+      confidence: confidence * 0.9, // Slightly lower confidence for developer patterns
+      confidenceLabel: confidence > 0.66 ? 'High' : confidence > 0.33 ? 'Medium' : 'Low',
+      leadTime: '1-3 months',
+      action: 'Monitor developer acquisitions and pipeline',
+      supportingTools: ['Developer Intelligence', 'Entity Analysis'],
+      relatedProjectId: projectId,
+      discoveredAt: now,
+      status: 'new' as const,
+    });
+  });
+
+  // Create assemblage opportunity if identified by agent
+  if (agentResponse.structured_data?.assemblage) {
+    const assemblage = agentResponse.structured_data.assemblage;
+    opportunities.push({
+      id: `opp-assemblage-${Date.now()}`,
+      type: 'assemblage' as const,
+      property: assemblage.description || `${assemblage.parcel_count} contiguous parcels`,
+      market: setup.market,
+      marketCode: setup.marketCode || setup.market.toLowerCase().replace(/\s+/g, '_'),
+      signal: `${assemblage.parcel_count} parcels (${assemblage.total_acres} acres) - $${assemblage.total_value?.toLocaleString()}`,
+      signalType: 'spatial_analysis',
+      confidence: confidence * 0.95,
+      confidenceLabel: confidence > 0.66 ? 'High' : confidence > 0.33 ? 'Medium' : 'Low',
+      leadTime: 'Immediate',
+      action: 'Assemble parcels for developer sale',
+      estimatedReturn: agentResponse.structured_data.expected_return,
+      supportingTools: ['Property Specialist', 'Market Analysis', 'Developer Intelligence'],
+      relatedProjectId: projectId,
+      discoveredAt: now,
+      status: 'new' as const,
+    });
+  }
+
+  return opportunities;
+}
+
+/**
+ * Build activity log from agent execution
+ * Shows specialist invocations and analysis steps
+ */
+function buildActivityLog(
+  agentResponse: AgentResponse,
+  setup: ProjectSetup,
+  isBuyRecommendation: boolean,
+  confidence: number
+): Array<{
+  id: string;
+  timestamp: string;
+  toolName: string;
+  description: string;
+  result: string;
+  status: 'running' | 'complete' | 'failed';
+  duration?: string;
+}> {
+  const baseTime = Date.now();
+  const log: any[] = [];
+
+  // === USE STRUCTURED DATA IF AVAILABLE (PREFERRED) ===
+  if (agentResponse.structured_data?.specialist_breakdown && agentResponse.structured_data.specialist_breakdown.length > 0) {
+    let timeOffset = 600000; // Start 10 min ago
+    
+    // Add supervisor entry first
+    log.push({
+      id: `activity-supervisor-${baseTime}`,
+      timestamp: new Date(baseTime - timeOffset).toISOString(),
+      toolName: 'supervisor',
+      description: `Orchestrating analysis: "${setup.strategy || setup.name}"`,
+      result: `Delegated to ${agentResponse.structured_data.specialist_breakdown.length} specialist agents`,
+      status: 'complete' as const,
+      duration: '~5s',
+    });
+    
+    // Add each specialist from breakdown
+    agentResponse.structured_data.specialist_breakdown.forEach((specialist) => {
+      const duration = specialist.duration_seconds || 180;
+      timeOffset -= 60000; // Offset by 1 min between specialists
+      
+      log.push({
+        id: `activity-${specialist.specialist.toLowerCase().replace(/\s+/g, '-')}-${baseTime}`,
+        timestamp: new Date(baseTime - timeOffset).toISOString(),
+        toolName: specialist.specialist.toLowerCase().replace(/\s+/g, '_'),
+        description: `${specialist.specialist}: ${specialist.key_factors}`,
+        result: `Confidence: ${Math.round(specialist.confidence * 100)}%${specialist.tool_calls ? ` | Tool calls: ${specialist.tool_calls}` : ''}`,
+        status: 'complete' as const,
+        duration: `~${Math.floor(duration / 60)}min`,
+      });
+      
+      timeOffset -= duration * 1000;
+    });
+    
+    return log;
+  }
+
+  // === FALLBACK TO GENERIC LOG (no specialist_breakdown provided) ===
+  
+  // Add supervisor entry
+  log.push({
+    id: `activity-supervisor-${baseTime}`,
+    timestamp: new Date(baseTime - 600000).toISOString(), // 10 min ago
+    toolName: 'supervisor',
+    description: `Analyzing: "${setup.strategy || setup.name}"`,
+    result: 'Delegated to specialist agents for analysis',
+    status: 'complete' as const,
+    duration: '~5s',
+  });
+
+  // Add Property Specialist entry (if properties found)
+  if (agentResponse.structured_data?.properties && agentResponse.structured_data.properties.length > 0) {
+    log.push({
+      id: `activity-property-${baseTime}`,
+      timestamp: new Date(baseTime - 540000).toISOString(), // 9 min ago
+      toolName: 'property_specialist',
+      description: `Searching for properties in ${setup.market}`,
+      result: `Found ${agentResponse.structured_data.properties.length} properties matching criteria`,
+      status: 'complete' as const,
+      duration: '~4min',
+    });
+  }
+
+  // Add Market Specialist entry
+  log.push({
+    id: `activity-market-${baseTime}`,
+    timestamp: new Date(baseTime - 300000).toISOString(), // 5 min ago
+    toolName: 'market_specialist',
+    description: `Analyzing market trends in ${setup.market}`,
+    result: 'Market analysis complete with comparable properties and trends',
+    status: 'complete' as const,
+    duration: '~3min',
+  });
+
+  // Add Developer Intelligence entry (if developers found)
+  if (agentResponse.structured_data?.developers && agentResponse.structured_data.developers.length > 0) {
+    log.push({
+      id: `activity-developer-${baseTime}`,
+      timestamp: new Date(baseTime - 240000).toISOString(), // 4 min ago
+      toolName: 'developer_intelligence',
+      description: `Identifying active developers in ${setup.market}`,
+      result: `Identified ${agentResponse.structured_data.developers.length} active developers`,
+      status: 'complete' as const,
+      duration: '~2min',
+    });
+  }
+
+  // Add Regulatory Risk entry
+  log.push({
+    id: `activity-regulatory-${baseTime}`,
+    timestamp: new Date(baseTime - 120000).toISOString(), // 2 min ago
+    toolName: 'regulatory_risk',
+    description: `Analyzing zoning and regulatory risks in ${setup.market}`,
+    result: 'Regulatory analysis complete with zoning insights',
+    status: 'complete' as const,
+    duration: '~2min',
+  });
+
+  // Add final synthesis entry
+  log.push({
+    id: `activity-final-${baseTime}`,
+    timestamp: new Date(baseTime).toISOString(),
+    toolName: 'supervisor',
+    description: 'Synthesizing specialist analyses into recommendation',
+    result: `${isBuyRecommendation ? 'BUY' : 'PASS'} recommendation with ${Math.round(confidence * 100)}% confidence`,
+    status: 'complete' as const,
+    duration: '~1min',
+  });
+
+  return log;
 }

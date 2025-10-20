@@ -240,10 +240,56 @@ def invoke(user_query: str, session_id: str = None):
                    session_id=session_id,
                    tool_calls=len(result.tool_calls) if hasattr(result, 'tool_calls') else 0)
 
-        message = result.message if hasattr(result, 'message') else str(result)
+        # Extract text from Strands Agent result structure
+        # AgentResult needs to be converted to dict first
+        logger.info("Processing result", result_type=type(result).__name__)
 
-        # Extract structured data from specialist responses
-        structured_data = extract_structured_data(_specialist_responses)
+        # Convert AgentResult to dict if needed
+        if hasattr(result, 'model_dump'):
+            result_dict = result.model_dump()
+        elif hasattr(result, 'to_dict'):
+            result_dict = result.to_dict()
+        elif hasattr(result, 'dict'):
+            result_dict = result.dict()
+        elif isinstance(result, dict):
+            result_dict = result
+        else:
+            result_dict = dict(result) if hasattr(result, '__iter__') else {'message': str(result)}
+
+        logger.info("Converted to dict", has_content=('content' in result_dict), dict_keys=list(result_dict.keys())[:5])
+
+        # Extract message text from dict structure
+        # Format: {'role': 'assistant', 'content': [{'text': 'actual message'}]}
+        if 'content' in result_dict:
+            content = result_dict['content']
+            if isinstance(content, list) and len(content) > 0 and isinstance(content[0], dict) and 'text' in content[0]:
+                message = content[0]['text']
+            else:
+                message = str(content)
+        elif 'message' in result_dict:
+            message = result_dict['message']
+        else:
+            message = str(result_dict)
+
+        logger.info("Extracted message from result",
+                   message_length=len(message),
+                   message_type=type(message).__name__,
+                   is_string=isinstance(message, str))
+
+        # Strip internal agent thinking blocks from message before sending to frontend
+        # Agents may include <thinking>...</thinking> blocks that should not be visible to users
+        import re
+        if isinstance(message, str):
+            # Remove thinking blocks (including multiline)
+            message = re.sub(r'<thinking>.*?</thinking>', '', message, flags=re.DOTALL)
+            # Remove standalone thinking tags
+            message = re.sub(r'</?thinking>', '', message)
+            # Clean up extra whitespace
+            message = re.sub(r'\n\n\n+', '\n\n', message).strip()
+            logger.info("Cleaned thinking blocks from message", cleaned_length=len(message))
+
+        # Extract structured data from specialist responses AND final message
+        structured_data = extract_structured_data(_specialist_responses, final_message=message)
 
         return {
             'message': message,
@@ -261,46 +307,153 @@ def invoke(user_query: str, session_id: str = None):
         _specialist_responses = {}
 
 
-def extract_structured_data(specialist_responses: dict) -> dict:
+def extract_structured_data(specialist_responses: dict, final_message: str = None) -> dict:
     """
-    Parse specialist text responses to extract structured property and developer data.
-    This enables the frontend to show real coordinates on the globe.
+    Extract structured data from agent response for frontend dashboard integration.
+    
+    Strategy 1 (PREFERRED): Parse JSON block from final message
+    Strategy 2 (FALLBACK): Regex parsing from specialist responses
+    
+    The frontend needs structured data to populate:
+    - Report tab: Confidence, risks, actions
+    - Opportunities tab: Property cards, assemblage details
+    - Activity tab: Specialist breakdown with confidence and durations
+    - Globe/Map: Property markers at exact coordinates
     """
+    import re
+    import json
+    
+    # === STRATEGY 1: Extract JSON block from final message (PREFERRED) ===
+    if final_message:
+        # Look for ```json ... ``` block - use greedy match to capture entire JSON object
+        # Pattern: ```json followed by { ... } followed by ```
+        # Use [\s\S]* (greedy) to capture everything between last { and first ``` after it
+        json_match = re.search(r'```json\s*(\{[\s\S]*\})\s*```', final_message, re.MULTILINE | re.DOTALL)
+        if json_match:
+            try:
+                json_str = json_match.group(1).strip()
+                data = json.loads(json_str)
+                logger.info("✅ Extracted structured data from JSON block", 
+                           properties=len(data.get('properties', [])),
+                           developers=len(data.get('developers', [])),
+                           specialists=len(data.get('specialist_breakdown', [])),
+                           risks=len(data.get('risks', [])),
+                           actions=len(data.get('actions', [])),
+                           has_assemblage=bool(data.get('assemblage')))
+                
+                # Validate required fields
+                if 'recommendation' not in data:
+                    logger.warning("JSON block missing 'recommendation' field")
+                if 'confidence' not in data:
+                    logger.warning("JSON block missing 'confidence' field")
+                if 'properties' not in data:
+                    logger.warning("JSON block missing 'properties' field")
+                    
+                return data
+            except json.JSONDecodeError as e:
+                logger.warning("⚠️ JSON block found but invalid, falling back to regex", 
+                              error=str(e), 
+                              json_snippet=json_match.group(1)[:300])
+        else:
+            logger.warning("⚠️ No JSON block found in final message, using regex fallback")
+    
+    # === STRATEGY 2: Regex parsing from specialist responses (FALLBACK) ===
+    logger.info("Using regex fallback to extract structured data from specialist responses")
+    
     structured = {
         'properties': [],
         'developers': [],
         'recommendation': 'UNKNOWN',
-        'confidence': 0.5
+        'confidence': 0.5,
+        'specialist_breakdown': [],
+        'risks': [],
+        'actions': [],
+        'expected_return': None,
+        'assemblage': None
     }
 
     try:
         # Extract properties from Property Specialist response
+        # Format from logs: "parcel_id=06432-074-000, address=Granada Blvd, lat=29.6856, lon=-82.3426"
+        # Note: Prompt instructs "COORDINATES:" prefix but agent sometimes omits it
         if 'property' in specialist_responses:
             prop_text = specialist_responses['property']
-            # Look for property data in format: "parcel_id: XXX, address: YYY, lat: ZZ.ZZ, lon: -ZZ.ZZ"
-            # This is a simple regex parser - specialist would need to output in this format
-            property_pattern = r'parcel[_\s]?id[:\s]+([^,\n]+)[,\s]*address[:\s]+([^,\n]+)[,\s]*(?:lat|latitude)[:\s]+([\d\.\-]+)[,\s]*(?:lon|longitude)[:\s]+([\d\.\-]+)'
-            matches = re.findall(property_pattern, prop_text, re.IGNORECASE)
-            for match in matches[:10]:  # Limit to top 10
-                structured['properties'].append({
-                    'parcel_id': match[0].strip(),
-                    'address': match[1].strip(),
-                    'latitude': float(match[2]),
-                    'longitude': float(match[3])
-                })
+            
+            # Try WITH "COORDINATES:" prefix first (as instructed in prompt)
+            property_pattern_with_prefix = r'COORDINATES:\s*parcel_id=([^,\s]+)[\s,]+address=([^,]+)[\s,]+lat=([\d\.\-]+)[\s,]+lon=([\d\.\-]+)'
+            matches = re.findall(property_pattern_with_prefix, prop_text, re.IGNORECASE)
+            
+            # Fallback: Try WITHOUT prefix (actual format from some logs)
+            if len(matches) == 0:
+                property_pattern_no_prefix = r'parcel_id=([^,\s]+)[\s,]+address=([^,]+)[\s,]+lat=([\d\.\-]+)[\s,]+lon=([\d\.\-]+)'
+                matches = re.findall(property_pattern_no_prefix, prop_text, re.IGNORECASE)
+            
+            logger.info(f"Extracted {len(matches)} properties with coordinates from Property Specialist")
+            
+            for match in matches[:20]:  # Increased limit to 20 properties
+                try:
+                    structured['properties'].append({
+                        'parcel_id': match[0].strip(),
+                        'address': match[1].strip(),
+                        'latitude': float(match[2]),
+                        'longitude': float(match[3])
+                    })
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Could not parse property: {match}, error: {e}")
+                    continue
 
         # Extract developers from Developer Intelligence response
+        # Formats: "1. **UCG REALTY LLC**" or "UCG Realty (86 properties)" or "Top Developers: UCG Realty"
         if 'developer' in specialist_responses:
             dev_text = specialist_responses['developer']
-            # Look for developer names
-            dev_pattern = r'(?:developer|entity)[:\s]+([A-Z][A-Z\s\&\.]+(?:LLC|INC|CORP)?)'
-            matches = re.findall(dev_pattern, dev_text)
-            for match in matches[:5]:  # Limit to top 5
-                structured['developers'].append({
-                    'name': match.strip()
-                })
+            
+            # Pattern 1: Numbered list with bold (markdown): "1. **UCG REALTY LLC**"
+            dev_pattern1 = r'\d+\.\s+\*\*([A-Z][A-Z\s\&\.\,\-]+(?:LLC|INC|CORP|HOMES|REALTY|GROUP|PROPERTIES)?)\*\*'
+            matches1 = re.findall(dev_pattern1, dev_text, re.IGNORECASE)
+            
+            # Pattern 2: Name with property count: "UCG Realty (86 properties)"
+            dev_pattern2 = r'([A-Z][A-Z\s\&\.\,\-]+(?:LLC|INC|CORP|HOMES|REALTY|GROUP|PROPERTIES)?)\s*\(\d+\s+properties?\)'
+            matches2 = re.findall(dev_pattern2, dev_text, re.IGNORECASE)
+            
+            # Pattern 3: After "Top Developers:" or "Developer:" labels
+            dev_pattern3 = r'(?:Top\s+Developers?|Developer)[:\s]+([A-Z][A-Z\s\&\.\,\-]+(?:LLC|INC|CORP|HOMES|REALTY|GROUP|PROPERTIES)?)'
+            matches3 = re.findall(dev_pattern3, dev_text, re.IGNORECASE)
+            
+            # Combine and deduplicate
+            all_matches = matches1 + matches2 + matches3
+            seen = set()
+            
+            for match in all_matches[:10]:  # Limit to top 10
+                clean_name = match.strip().upper()
+                if clean_name and clean_name not in seen and len(clean_name) > 3:
+                    seen.add(clean_name)
+                    structured['developers'].append({
+                        'name': match.strip()  # Keep original capitalization
+                    })
+            
+            logger.info(f"Extracted {len(structured['developers'])} developers from Developer Intelligence")
+
+        # Extract recommendation from Supervisor's final response
+        # Look for patterns like "CONDITIONAL BUY", "BUY", "PASS", etc.
+        supervisor_text = specialist_responses.get('supervisor', '')
+        if 'BUY' in supervisor_text.upper() and 'NOT' not in supervisor_text.upper():
+            if 'CONDITIONAL' in supervisor_text.upper():
+                structured['recommendation'] = 'CONDITIONAL BUY'
+            else:
+                structured['recommendation'] = 'BUY'
+        elif 'PASS' in supervisor_text.upper():
+            structured['recommendation'] = 'PASS'
+        
+        # Extract confidence score
+        # Patterns: "Confidence: 60%", "60% confidence", "Overall Confidence: 60%"
+        confidence_pattern = r'(?:confidence|conf)[:\s]+(\d+)%|(\d+)%\s+confidence'
+        confidence_match = re.search(confidence_pattern, supervisor_text, re.IGNORECASE)
+        if confidence_match:
+            confidence_val = confidence_match.group(1) or confidence_match.group(2)
+            structured['confidence'] = float(confidence_val) / 100
+            logger.info(f"Extracted confidence: {structured['confidence']}")
 
     except Exception as e:
-        logger.warning("Could not extract structured data", error=str(e))
+        logger.error("Could not extract structured data", error=str(e), exc_info=True)
 
     return structured

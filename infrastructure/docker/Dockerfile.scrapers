@@ -1,49 +1,80 @@
 # Dominion Scraper Container
-# Runs scheduled data scraping tasks (permits, sales, entity enrichment)
+# Optimised for AWS Fargate tasks (ARM64) running browser-based scrapers
 
-FROM public.ecr.aws/lambda/python:3.12-arm64
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
 
-# Install system dependencies for Patchright (browser automation)
-RUN dnf install -y \
-    libX11 \
-    libXcomposite \
-    libXdamage \
-    libXext \
-    libXfixes \
-    libXrandr \
-    libgbm \
-    libnss3 \
-    libatk-1.0 \
-    libatk-bridge-2.0 \
-    libcups \
-    libdrm \
-    libxkbcommon \
-    libxcb \
-    alsa-lib \
-    at-spi2-atk \
-    at-spi2-core \
-    && dnf clean all
+# Set non-interactive mode and UTF-8 locale
+ENV LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/usr/local/bin:/usr/bin:/bin"
+
+# Install system packages required for Python, Chromium, and headless automation
+RUN dnf update -y && \
+    dnf install -y \
+      python3.11 \
+      python3.11-devel \
+      python3-pip \
+      nss \
+      atk \
+      cups-libs \
+      libXcomposite \
+      libXcursor \
+      libXdamage \
+      libXext \
+      libXi \
+      libXtst \
+      libdrm \
+      libxcb \
+      libxkbcommon \
+      alsa-lib \
+      at-spi2-atk \
+      at-spi2-core \
+      mesa-libgbm \
+      pango \
+      gtk3 \
+      xorg-x11-fonts-100dpi \
+      xorg-x11-fonts-75dpi \
+      xorg-x11-utils \
+      xorg-x11-fonts-Type1 \
+      xorg-x11-fonts-misc \
+      freetype \
+      glibc-langpack-en \
+      wget \
+      which \
+      git && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
+
+# Make python3 / pip3 default to 3.11
+RUN ln -sf /usr/bin/python3.11 /usr/bin/python && \
+    ln -sf /usr/bin/pip3.11 /usr/bin/pip
+
+# Upgrade pip and setuptools early to avoid build issues
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements
-COPY src/requirements.txt ./requirements.txt
+# Copy scraper-specific requirements
+COPY infrastructure/docker/requirements.scrapers.txt ./requirements.scrapers.txt
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies needed by scrapers
+RUN pip install --no-cache-dir -r requirements.scrapers.txt
 
-# Install Patchright browsers
-RUN patchright install chromium
+# Install browser binaries for Playwright/Patchright workloads
+RUN patchright install chromium && \
+    python -m playwright install chromium && \
+    python -m playwright install-deps
 
 # Copy application code
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 
-# Set Python path
-ENV PYTHONPATH=/app
-
-# Entry point script
+# Copy entrypoint
 COPY infrastructure/docker/scraper_entrypoint.py ./scraper_entrypoint.py
+
+# Ensure project modules are importable
+ENV PYTHONPATH=/app/src:/app/scripts
 
 CMD ["python", "scraper_entrypoint.py"]

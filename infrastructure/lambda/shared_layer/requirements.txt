@@ -1,17 +1,6 @@
-# Simplified Lambda Layer Dependencies for Hackathon
-# Only what we actually use in the handlers
-
-# AWS SDK (already provided by Lambda runtime, but good to pin version)
+--extra-index-url https://download.pytorch.org/whl/cpu
 boto3>=1.34.144
 botocore>=1.34.144
-
-# That's it! Our handlers are self-contained and use only:
-# - boto3 (AWS services)
-# - json (Python stdlib)
-# - typing (Python stdlib)
-# - datetime (Python stdlib)
-
-# NOTE: After hackathon, when scrapers are deployed, add:
-# patchright>=1.0.0
-# beautifulsoup4>=4.12.0
-# requests>=2.31.0
+numpy>=1.24.0
+torch==2.1.0
+sentence-transformers>=2.7.0
