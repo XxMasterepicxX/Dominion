@@ -1,143 +1,101 @@
-# Dominion – AI-Powered Real Estate Intelligence Agent  
-**AWS AI Agent Global Hackathon Submission**
+# Dominion Real Estate Intelligence
 
-Dominion is an autonomous AI agent designed to discover, track, and analyze real estate development signals across diverse data sources. It leverages advanced entity resolution, multi-source reasoning, and pattern detection to uncover hidden development opportunities before they become public knowledge.
+> Autonomous multi-agent due diligence for institutional real estate teams.
 
----
+Dominion is an AI-native intelligence layer for real estate acquisition teams. It blends multi-agent reasoning on Amazon Bedrock with rich property, ordinance, and entity data to surface actionable buy/hold/pass recommendations backed by verifiable evidence.
 
-## Problem Statement
+## Submission for AWS AI Agent Global Hackathon
 
-Real estate investors and developers often face delayed discovery of investment opportunities. By the time development plans surface publicly, competition has already begun. Manual research across fragmented data sources—permits, LLC filings, property records, and public documents—leads to missed insights and inefficiencies.
+This project is a submission for the AWS AI Agent Global Hackathon.
+* **Team:** Cesar Valentin, Colgan Miller, and Vasco Hinostroza.
 
-Dominion solves this challenge through a fully autonomous agent that continuously monitors more than ten data sources in real time. Using AI-powered entity resolution and reasoning, it connects related entities and detects early indicators of real estate activity.
+## Demo
 
----
+[Link to 3-minute Demo Video]
 
-## AI Agent Capabilities
+## The Problem
 
-### 1. Autonomous Data Collection and Processing
-- Automated scraping across permits, business registries, crime data, council meetings, and news sources.  
-- Context-aware extraction and adaptive parsing for each source.  
-- Intelligent scheduling and error recovery for continuous, unattended operation.
+Real estate developers and acquisition teams face overwhelming due diligence workloads: synthesizing parcel data, zoning ordinances, historical permits, market trends, and competitor activity often takes weeks. Decisions made with stale or incomplete intelligence translate into missed opportunities and costly mistakes, especially in fast-moving secondary markets like Gainesville, FL.
 
-### 2. AI-Powered Entity Resolution
-Dominion employs a hierarchical, confidence-based matching system to link entities across sources:
-- **Tier 1:** Definitive key matching (document numbers, tax IDs, parcel IDs).  
-- **Tier 2:** Multi-signal scoring (name similarity, address matching, ownership overlap).  
-- **Tier 3:** LLM-based reasoning for ambiguous matches.  
+## Our Solution
 
-This system enables accurate cross-referencing of companies, individuals, and properties.
-
-### 3. Intelligent Enrichment System
-- Conditional enrichment retrieves only missing data to reduce API overhead.  
-- Smart search differentiates between companies and individuals.  
-- Fuzzy matching and context-based disambiguation handle variations and incomplete data.
-
-### 4. Pattern Detection and Market Intelligence
-- Detects **property assemblage** patterns (entities acquiring adjacent lots).  
-- Tracks **LLC formations** associated with new developments.  
-- Correlates **permits, sales, and entity changes** to identify development sequences.  
-- Conducts **sentiment analysis** from local and business news coverage.
-
----
+Dominion delivers an autonomous, multi-agent analyst that reasons over institutional-grade data using Amazon Bedrock. A Bedrock AgentCore supervisor (Nova Premier) orchestrates four specialist agents (Nova Lite) that each command Lambda-hosted tools. Those tools query an Aurora PostgreSQL + pgvector knowledge store, run ordinance RAG lookups using a custom-trained embedding model (replacing Titan due to poor performance), and trigger enrichment workflows. The result is a defensible recommendation (buy / hold / pass) complete with confidence scores, supporting evidence, and next actions that the web dashboard can surface to deal teams in minutes instead of weeks.
 
 ## Architecture
 
-### Core Stack
-- **Database:** PostgreSQL 16 + PostGIS + pgvector  
-- **AI/ML:** AWS Bedrock (Claude, Nova), Amazon SageMaker AI  
-- **Web Scraping:** Patchright, BeautifulSoup, Requests  
-- **Data Processing:** Pandas, GeoPandas, Pydantic  
-- **Integrations:** Census Bureau, Socrata, SFTP sources  
+`[Architecture Diagram image]`
 
-### Data Pipeline Overview
-1. **Autonomous Collection:** Ten scrapers execute on a schedule with adaptive throttling.  
-2. **Ingestion and Deduplication:** All raw data is hashed, versioned, and stored immutably.  
-3. **AI Enrichment:** Missing data is selectively retrieved and contextually validated.  
-4. **Entity Resolution:** Multi-signal scoring and LLM reasoning for cross-source linkage.  
-5. **Relationship Graph:** Structured mapping between entities, properties, and developments.  
-6. **Intelligence Layer:** Detection of assemblage patterns, development trends, and early signals.
+The frontend (React + TypeScript + Vite) collects analyst prompts and streams progress updates. A Bedrock AgentCore app hosted on Lambda Function URLs orchestrates the workflow: the supervisor agent decomposes the task, specialists call Lambda tools for property search, ordinance RAG, and enrichment, and the custom-embedded Aurora pgvector store returns ground-truth evidence. Infrastructure is provisioned via AWS CDK: Aurora Serverless v2 (RDS Data API + Secrets Manager), dedicated tool Lambdas, and the AgentCore multi-agent runtime. Logs, health pings, and long-running sessions are handled inside AgentCore so the agents stay responsive throughout 10–20 minute analyses.
 
----
+## Tech Stack & AWS Services
 
-## AWS Integration
+### AWS Services Used
+* **Amazon Bedrock (Nova):** Powers core reasoning (Nova Premier + Nova Lite). We use our own custom embedding model for ordinance vector search instead of Titan (`infrastructure/lambda/rag/handler.py`).
+* **Amazon Bedrock AgentCore:** Hosts the supervisor + specialist agents and exposes `/invocations` endpoints via `BedrockAgentCoreApp` (`infrastructure/agentcore_agent/dominion_multiagent.py`).
+* **AWS Lambda:** Runs 12 tool endpoints—Intelligence, RAG, and Enrichment handlers that the agents invoke through the AWS SDK (`infrastructure/lambda/**/handler.py`).
+* **Amazon Aurora PostgreSQL Serverless v2 (pgvector):** Stores 108K properties, 89K entities, and vectorized ordinance chunks using our custom embedding model for low-latency retrieval (`infrastructure/app.py`, `infrastructure/lambda/rag/handler.py`).
+* **Amazon RDS Data API:** Enables serverless SQL access from Lambda without VPC cold starts (`infrastructure/lambda/intelligence/handler.py`).
+* **AWS Secrets Manager:** Supplies the `SECRET_ARN` used by Lambdas to fetch Aurora credentials at runtime.
+* **AWS CDK:** Defines the full stack (Aurora, Lambdas, AgentCore) in code for reproducible deployments (`infrastructure/app.py`).
 
-### Amazon Bedrock
-- **Entity Extraction:** Process unstructured text (council minutes, permits, articles).  
-- **Reasoning:** Handle uncertain matches with contextual interpretation.  
-- **Pattern Analysis:** Identify clusters and development trends.
+### Core Technologies
+* **Backend:** Python 3.12, Strands Agents on Bedrock AgentCore, asynchronous data services with `asyncpg`, `SQLAlchemy`, `structlog`, and Lambda tool wrappers (`infrastructure/agentcore_agent/dominion_agent.py`, `src/database/connection.py`).
+* **Frontend:** React 18 + TypeScript (Vite), with `framer-motion`, `react-globe.gl`, `leaflet`, `tailwind-merge`, and `clsx` for immersive data storytelling (`frontend/package.json`, `frontend/src/components/*`).
+* **Database:** Aurora PostgreSQL + pgvector (with local Postgres/Redis via Docker Compose) seeded from `src/database/schema_v2_multimarket.sql`.
+* **Libraries:** `bedrock-agentcore`, `strands-agents`, `boto3`, `patchright`, `beautifulsoup4`, `pandas`, `torch`, plus frontend tooling (`react-router-dom`, `vitest`, `@testing-library/react`).
 
-### Amazon SageMaker AI
-- **Confidence Calibration:** Train models for entity match prediction.  
-- **Pattern Detection:** Supervised learning for property assemblage and ownership networks.
+## How to Run it Locally
 
-### Amazon Q
-- **Natural Language Querying:** Users can ask domain questions such as:  
-  “Show all LLCs that acquired three or more properties in Gainesville during Q4 2024.”
+### Prerequisites
+* AWS CLI configured with credentials that can invoke Bedrock and provision infrastructure.
+* AWS CDK v2 (`npm install -g aws-cdk`) bootstrapped for your target account/region.
+* Python 3.12 (for AgentCore runtime and Lambda tooling).
+* Node.js v18+ and npm.
+* Docker & Docker Compose (for local Postgres + Redis mirrors).
+* (Optional) Tesseract OCR and system packages if you plan to exercise document ingestion locally.
 
-### AWS Infrastructure
-- **Lambda:** Event-driven scraper orchestration.  
-- **S3:** Document and raw data storage.  
-- **API Gateway:** RESTful endpoints for queries.  
-- **RDS (PostgreSQL):** Vector-enabled relational data store.  
-
----
-
-## Demo Scenario
-
-**Query:** Find property assemblage opportunities in Gainesville, FL.
-
-**Workflow:**
-1. Agent autonomously scrapes recent permit data.  
-2. Identifies contractor “Infinity Development LLC” on three projects.  
-3. Enriches data via business registry and property records.  
-4. Detects ownership of five adjacent parcels.  
-5. Flags pattern as “pre-development assemblage.”  
-
-**Result:** The agent surfaces actionable intelligence weeks before public announcement.
-
----
-
-## Key Metrics
-- **Data Sources:** 10+ autonomous scrapers.  
-- **Entity Resolution Accuracy:** ≥95% on auto-accepts (≥0.85 confidence).  
-- **API Efficiency:** 80% reduction in enrichment calls.  
-- **Autonomy:** Full operation without human intervention.  
-- **Traceability:** 100% data provenance via source URLs and timestamps.
-
----
-
-## How to Build and Deploy
-
-### Requirements
-- Python 3.11+  
-- PostgreSQL 16+ (with PostGIS, pgvector)  
-- Redis (optional for caching and queues)  
-
-### Quick Start
+### Backend Setup
 ```bash
-# Clone repository
-git clone https://github.com/XxMasterepicxX/Dominion.git
+# Clone the repository
+git clone [Your Repo URL]
 cd Dominion
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Add your AWS keys and API credentials
-
-# Start database and services
+# Launch local data stores (Postgres + Redis) for development
 docker-compose up -d
 
-# Initialize schema
-python -m src.database.init_database
+# Python virtual environment
+python -m venv .venv
+# Windows
+.\.venv\Scripts\activate
+# macOS/Linux
+source .venv/bin/activate
 
-# Run scrapers
-python -m src.scrapers.city_permits --market gainesville_fl
-python -m src.scrapers.sunbiz --market florida
+# Install core API / tooling dependencies
+pip install -r requirements.txt
+pip install -r src/requirements.txt
 
-# Test entity resolution
-python -m tests.services.test_entity_resolution
+# Copy and edit environment variables
+cp .env.example .env
+# Populate Aurora connection strings, Redis URL, and Bedrock model IDs as needed
 
-*Dominion: Autonomous Intelligence for Real Estate Development Discovery*
+# (Optional) Seed local Postgres with the provided schema
+psql -h localhost -U postgres -d dominion -f src/database/schema_v2_multimarket.sql
+```
+
+To run the Bedrock AgentCore app locally (served on port 8080 by default):
+
+```bash
+cd infrastructure/agentcore_agent
+pip install -r requirements.txt
+python dominion_agent.py               # single-agent supervisor
+# or
+python dominion_multiagent.py          # supervisor + 4 specialists
+```
+
+This exposes the AgentCore `/invocations` endpoint at `http://localhost:8080/invocations`, mirroring the production Lambda Function URL.
+
+If you need to deploy AWS infrastructure (Aurora, Lambdas, AgentCore) from scratch:
+
+```bash
+cd infrastructure
+... (33 lines left)
