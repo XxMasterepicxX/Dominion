@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import logo from '../assets/logo.png';
 import { Globe } from '../components/Globe';
@@ -50,7 +50,8 @@ type InlineSegment = {
 
 type MarkdownBlock =
   | { type: 'paragraph'; lines: InlineSegment[][] }
-  | { type: 'list'; items: InlineSegment[][] };
+  | { type: 'list'; items: InlineSegment[][] }
+  | { type: 'table'; headers: InlineSegment[][]; rows: InlineSegment[][][] };
 
 const MISENCODED_BULLET = '\u00E2\u20AC\u00A2';
 
@@ -119,6 +120,35 @@ const stripBulletPrefix = (line: string) => {
   return trimmed;
 };
 
+const TABLE_SEPARATOR_CELL_REGEX = /^:?-{3,}:?$/;
+
+const isTableSeparatorLine = (line: string) => {
+  const trimmed = line.trim();
+  if (!trimmed.includes('|')) {
+    return false;
+  }
+  const segments = trimmed
+    .replace(/^\||\|$/g, '')
+    .split('|')
+    .map((segment) => segment.trim());
+  return segments.length > 0 && segments.every((segment) => TABLE_SEPARATOR_CELL_REGEX.test(segment));
+};
+
+const splitTableRow = (line: string): string[] =>
+  line
+    .trim()
+    .replace(/^\||\|$/g, '')
+    .split('|')
+    .map((cell) => cell.trim());
+
+const normalizeTableCells = (cells: string[], columnCount: number): string[] => {
+  const normalized = cells.slice(0, columnCount);
+  while (normalized.length < columnCount) {
+    normalized.push('');
+  }
+  return normalized;
+};
+
 const parseSimpleMarkdownBlocks = (text: string): MarkdownBlock[] => {
   if (!text) {
     return [];
@@ -146,6 +176,30 @@ const parseSimpleMarkdownBlocks = (text: string): MarkdownBlock[] => {
 
     if (lines.length === 0) {
       return;
+    }
+
+    if (lines.length >= 2 && lines[0].includes('|') && isTableSeparatorLine(lines[1])) {
+      const headerCells = splitTableRow(lines[0]);
+      const bodyRowsRaw = lines.slice(2).map((row) => splitTableRow(row));
+      const columnCount = [headerCells.length, ...bodyRowsRaw.map((row) => row.length)].reduce(
+        (max, value) => Math.max(max, value),
+        0,
+      );
+
+      if (columnCount > 0) {
+        const headers = normalizeTableCells(headerCells, columnCount).map((cell) => tokenizeInlineSegments(cell));
+        const rows = bodyRowsRaw
+          .map((row) => normalizeTableCells(row, columnCount))
+          .filter((row) => row.some((cell) => cell.length > 0))
+          .map((row) => row.map((cell) => tokenizeInlineSegments(cell)));
+
+        blocks.push({
+          type: 'table',
+          headers,
+          rows,
+        });
+        return;
+      }
     }
 
     const isList = lines.every((line) => hasBulletPrefix(line));
@@ -179,19 +233,26 @@ const renderInlineSegments = (segments: InlineSegment[], keyPrefix: string): Rea
 const renderSimpleMarkdown = (
   text: string,
   keyPrefix: string,
-  options: { paragraphClass?: string; listClass?: string } = {},
+  options: {
+    paragraphClass?: string;
+    listClass?: string;
+    tableClass?: string;
+    tableWrapperClass?: string;
+  } = {},
 ): ReactNode[] => {
   const blocks = parseSimpleMarkdownBlocks(text);
   if (blocks.length === 0) {
     return [];
   }
 
+  const { paragraphClass, listClass, tableClass, tableWrapperClass } = options;
+
   return blocks.map((block, blockIndex) => {
     if (block.type === 'list') {
       return (
         <ul
           key={`${keyPrefix}-list-${blockIndex}`}
-          className={options.listClass}
+          className={listClass}
         >
           {block.items.map((item, itemIndex) => (
             <li key={`${keyPrefix}-list-${blockIndex}-item-${itemIndex}`}>
@@ -199,6 +260,48 @@ const renderSimpleMarkdown = (
             </li>
           ))}
         </ul>
+      );
+    }
+
+    if (block.type === 'table') {
+      const wrapperClassName = tableWrapperClass ?? 'dashboard__markdown-table-wrapper';
+      const tableClassName = tableClass ?? 'dashboard__markdown-table';
+
+      return (
+        <div key={`${keyPrefix}-table-${blockIndex}`} className={wrapperClassName}>
+          <table className={tableClassName}>
+            {block.headers.length > 0 && (
+              <thead>
+                <tr>
+                  {block.headers.map((cell, headerIndex) => (
+                    <th key={`${keyPrefix}-table-${blockIndex}-header-${headerIndex}`}>
+                      {renderInlineSegments(
+                        cell,
+                        `${keyPrefix}-table-${blockIndex}-header-${headerIndex}`,
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+            )}
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={`${keyPrefix}-table-${blockIndex}-row-${rowIndex}`}>
+                  {row.map((cell, cellIndex) => (
+                    <td
+                      key={`${keyPrefix}-table-${blockIndex}-row-${rowIndex}-cell-${cellIndex}`}
+                    >
+                      {renderInlineSegments(
+                        cell,
+                        `${keyPrefix}-table-${blockIndex}-row-${rowIndex}-cell-${cellIndex}`,
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       );
     }
 
@@ -215,7 +318,7 @@ const renderSimpleMarkdown = (
     return (
       <p
         key={`${keyPrefix}-paragraph-${blockIndex}`}
-        className={options.paragraphClass}
+        className={paragraphClass}
       >
         {nodes}
       </p>
@@ -439,7 +542,7 @@ export const Dashboard = () => {
 
   const introProjectLine = useMemo(() => {
     if (state) {
-      return `${state.project.name} Â� ${state.project.market}`;
+      return `${state.project.name} Â� ${state.project.market}`;
     }
     if (requestedProjectId) {
       return `Project ${requestedProjectId}`;
@@ -450,7 +553,7 @@ export const Dashboard = () => {
   const { status: introStatus, detail: introDetail, caption: introCaption } = useMemo(() => {
     const withProject = (base?: string) => {
       if (introProjectLine) {
-        return base ? `${base} Â� ${introProjectLine}` : introProjectLine;
+        return base ? `${base} Â� ${introProjectLine}` : introProjectLine;
       }
       return base;
     };

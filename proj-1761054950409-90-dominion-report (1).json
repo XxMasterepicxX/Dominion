@@ -1,0 +1,731 @@
+{
+  "version": 1,
+  "exportedAt": "2025-10-21T14:12:59.247Z",
+  "state": {
+    "project": {
+      "id": "proj-1761054950409-90",
+      "name": "test",
+      "type": "market_research",
+      "market": "Gainesville, FL",
+      "marketCode": "gainesville_fl",
+      "generatedAt": "2025-10-21T14:10:22.953Z",
+      "lastUpdated": "2025-10-21T14:10:22.953Z",
+      "isLive": false,
+      "updateCount": 1,
+      "confidence": 0.72,
+      "opportunities": 5
+    },
+    "latestUpdates": [
+      {
+        "id": "update-1761055822954",
+        "title": "AI Analysis Complete",
+        "detail": "Analyzed 400 propertys; highlighted 5",
+        "timestamp": "2025-10-21T14:10:22.953Z",
+        "updateType": "new_opportunity",
+        "status": "new",
+        "relatedProjectId": "proj-1761054950409-90",
+        "impact": "positive"
+      }
+    ],
+    "trackingDensity": {
+      "label": "Properties Analyzed",
+      "value": "400 propertys",
+      "metric": "properties"
+    },
+    "focusCard": {
+      "header": "Gainesville, FL",
+      "tag": "CONDITIONAL_BUY",
+      "tagType": "success",
+      "summary": "## DOMINION ANALYSIS",
+      "stats": [
+        {
+          "label": "Confidence",
+          "value": "72%",
+          "highlight": true
+        },
+        {
+          "label": "Properties Analyzed",
+          "value": "400"
+        },
+        {
+          "label": "Developers Identified",
+          "value": "4"
+        }
+      ]
+    },
+    "markets": [
+      {
+        "location": [
+          29.6948,
+          -82.3436
+        ],
+        "size": 0.08,
+        "label": "1617 NW 45TH AVE",
+        "marketCode": "gainesville_fl",
+        "properties": 1,
+        "entities": 4,
+        "activeEntities": 2,
+        "confidence": 0.72,
+        "confidenceLabel": "High",
+        "parcelId": "07912-000-000",
+        "propertyType": "Single Family",
+        "marketValue": 199864
+      },
+      {
+        "location": [
+          29.7352,
+          -82.3843
+        ],
+        "size": 0.08,
+        "label": "8728 NW 40TH CIR",
+        "marketCode": "gainesville_fl",
+        "properties": 1,
+        "entities": 4,
+        "activeEntities": 2,
+        "confidence": 0.72,
+        "confidenceLabel": "High",
+        "parcelId": "05977-252-000",
+        "propertyType": "Vacant Land",
+        "marketValue": 137790
+      },
+      {
+        "location": [
+          29.6851,
+          -82.3233
+        ],
+        "size": 0.08,
+        "label": "3540 NE 1ST WAY",
+        "marketCode": "gainesville_fl",
+        "properties": 1,
+        "entities": 4,
+        "activeEntities": 2,
+        "confidence": 0.72,
+        "confidenceLabel": "High",
+        "parcelId": "08247-065-000",
+        "propertyType": "Mobile Home",
+        "marketValue": 175314
+      },
+      {
+        "location": [
+          29.6419,
+          -82.3585
+        ],
+        "size": 0.08,
+        "label": "4100 SW 13TH ST",
+        "marketCode": "gainesville_fl",
+        "properties": 1,
+        "entities": 4,
+        "activeEntities": 2,
+        "confidence": 0.72,
+        "confidenceLabel": "High",
+        "parcelId": "06985-040-130",
+        "propertyType": "Commercial",
+        "marketValue": 199995
+      },
+      {
+        "location": [
+          29.6856,
+          -82.3426
+        ],
+        "size": 0.08,
+        "label": "1593 NW 29TH RD UNIT 2",
+        "marketCode": "gainesville_fl",
+        "properties": 1,
+        "entities": 4,
+        "activeEntities": 2,
+        "confidence": 0.72,
+        "confidenceLabel": "High",
+        "parcelId": "09000-001-193",
+        "propertyType": "Condo",
+        "marketValue": 35000
+      }
+    ],
+    "propertyDetails": {
+      "07912-000-000": {
+        "parcelId": "07912-000-000",
+        "address": "1617 NW 45TH AVE",
+        "propertyType": "Single Family",
+        "zoning": "RES SF 1",
+        "lotSizeSqft": 15445,
+        "acreage": 0.35,
+        "marketValue": 199864
+      },
+      "05977-252-000": {
+        "parcelId": "05977-252-000",
+        "address": "8728 NW 40TH CIR",
+        "propertyType": "Vacant Land",
+        "zoning": "PLANNED DEV",
+        "lotSizeSqft": 10890,
+        "acreage": 0.25,
+        "marketValue": 137790
+      },
+      "08247-065-000": {
+        "parcelId": "08247-065-000",
+        "address": "3540 NE 1ST WAY",
+        "propertyType": "Mobile Home",
+        "zoning": "MOBILE HOME",
+        "lotSizeSqft": 1200,
+        "acreage": 0.03,
+        "marketValue": 175314
+      },
+      "06985-040-130": {
+        "parcelId": "06985-040-130",
+        "address": "4100 SW 13TH ST",
+        "propertyType": "Commercial",
+        "zoning": "COMMERCIAL",
+        "lotSizeSqft": 2178,
+        "acreage": 0.05,
+        "marketValue": 199995
+      },
+      "09000-001-193": {
+        "parcelId": "09000-001-193",
+        "address": "1593 NW 29TH RD UNIT 2",
+        "propertyType": "Condo",
+        "zoning": "CONDO",
+        "lotSizeSqft": 0,
+        "acreage": 0,
+        "marketValue": 35000
+      }
+    },
+    "reportContent": {
+      "projectId": "proj-1761054950409-90",
+      "projectName": "test",
+      "analysisType": "Multi-Agent AI Analysis (AWS Bedrock AgentCore)",
+      "confidence": 0.72,
+      "confidenceLabel": "High",
+      "dataCoverage": "Alachua County, Florida",
+      "summary": "The Gainesville market presents a **buyer's opportunity** with stable trends and 8.1% absorption. However, a critical price discrepancy exists between Property Specialist ($199K) and Market Specialist ($35K) for the condo property. **Recommendation: CONDITIONAL BUY** on 3 properties pending environmental due diligence and price verification. Expected return 12-24% over 2-3 years.",
+      "marketContext": "Analysis for Gainesville, FL, market_research",
+      "sections": [
+        {
+          "title": "Executive Summary",
+          "content": "The Gainesville market presents a **buyer's opportunity** with stable trends and 8.1% absorption. However, a critical price discrepancy exists between Property Specialist ($199K) and Market Specialist ($35K) for the condo property. **Recommendation: CONDITIONAL BUY** on 3 properties pending environmental due diligence and price verification. Expected return 12-24% over 2-3 years.",
+          "metrics": [
+            {
+              "label": "Recommendation",
+              "value": "CONDITIONAL_BUY",
+              "highlight": true
+            },
+            {
+              "label": "Confidence",
+              "value": "72%",
+              "highlight": true
+            },
+            {
+              "label": "Expected Return",
+              "value": "12-24% over 2-3 years",
+              "highlight": true
+            }
+          ]
+        },
+        {
+          "title": "Property Coverage",
+          "content": "Analyzed 400 properties across asset classes.",
+          "metrics": [
+            {
+              "label": "CONDO",
+              "value": "0",
+              "highlight": false
+            },
+            {
+              "label": "MOBILE HOME",
+              "value": "100",
+              "highlight": true
+            },
+            {
+              "label": "OTHER",
+              "value": "100",
+              "highlight": true
+            },
+            {
+              "label": "SINGLE FAMILY",
+              "value": "100",
+              "highlight": true
+            },
+            {
+              "label": "TOWNHOME",
+              "value": "0",
+              "highlight": false
+            },
+            {
+              "label": "VACANT",
+              "value": "100",
+              "highlight": true
+            }
+          ]
+        },
+        {
+          "title": "Investment Thesis",
+          "content": "The Gainesville market shows stability with developer activity in residential and commercial sectors. The RES SF 1 property presents a rezoning opportunity, while mobile homes offer quick flips. However, the condo price discrepancy requires resolution. **Recommendation**: Proceed with 3 properties (RES SF 1, 2 mobile homes) pending environmental clearance and price verification."
+        },
+        {
+          "title": "Risks & Mitigation",
+          "content": "• Market Shift: Focus on high-demand types\n• Floodplain Status: Environmental survey\n• Developer Exit Risk: Identify backup buyers",
+          "metrics": [
+            {
+              "label": "Market Shift (Score: 8)",
+              "value": "Severity 4/5 × Probability 2/5",
+              "highlight": false
+            },
+            {
+              "label": "Floodplain Status (Score: 6)",
+              "value": "Severity 3/5 × Probability 2/5",
+              "highlight": false
+            },
+            {
+              "label": "Developer Exit Risk (Score: 6)",
+              "value": "Severity 2/5 × Probability 3/5",
+              "highlight": false
+            }
+          ]
+        },
+        {
+          "title": "Confidence Breakdown",
+          "content": "• Property: Spatial analysis, assemblage detection\n• Market: Comps validation, trend analysis\n• Developer Intelligence: Developer match scores\n• Regulatory & Risk: Checklist gaps, floodplain unknown",
+          "metrics": [
+            {
+              "label": "Property",
+              "value": "87%",
+              "highlight": true
+            },
+            {
+              "label": "Market",
+              "value": "90%",
+              "highlight": true
+            },
+            {
+              "label": "Developer Intelligence",
+              "value": "82%",
+              "highlight": true
+            },
+            {
+              "label": "Regulatory & Risk",
+              "value": "5%",
+              "highlight": false
+            }
+          ]
+        },
+        {
+          "title": "Alternative Scenarios",
+          "content": "**If floodplain detected:**\n- Reduce expected ROI by 10%  \n- Add $5K flood insurance cost  \n\n**If market shifts:**\n- Hold period increases to 3-5 years  \n- Alternative exit: Rent out mobile homes  \n\n**Alternative exit strategies:**\n1. **Primary**: Resale to developers (UCG/Warren)  \n2. **Backup**: Rent mobile homes for cash flow"
+        }
+      ],
+      "nextActions": [
+        "Verify condo property price discrepancy ($35K vs $199K)",
+        "Conduct environmental surveys for all 5 properties",
+        "Prioritize RES SF 1 (rezoning potential) and mobile homes",
+        "Confirm developer interest with UCG Realty and Warren Holdings"
+      ],
+      "sources": {
+        "tools": [
+          "Multi-Agent System",
+          "Property Specialist",
+          "Market Specialist",
+          "Developer Intelligence",
+          "Regulatory & Risk Specialist"
+        ],
+        "databases": [
+          "Aurora PostgreSQL (108K properties, 89K entities, 5K ordinances)"
+        ],
+        "coverage": "Alachua County, Florida"
+      },
+      "rawResponse": {
+        "success": true,
+        "message": "## DOMINION ANALYSIS\n\n### EXECUTIVE SUMMARY\nThe Gainesville market presents a **buyer's opportunity** with stable trends and 8.1% absorption. However, a critical price discrepancy exists between Property Specialist ($199K) and Market Specialist ($35K) for the condo property. **Recommendation: CONDITIONAL BUY** on 3 properties pending environmental due diligence and price verification. Expected return 12-24% over 2-3 years.\n\n**Recommendation: CONDITIONAL BUY**  \n**Confidence: 72%**  \n**Expected Return: 12-24% over 2-3 years**\n\n---\n\n### KEY FINDINGS\n\n#### Property Analysis (Property Specialist)\n- **Zoning Mismatch**: 1940-built home on 3.5 acres (RES SF 1) - potential rezoning  \n- **Mobile Home Opportunities**: 2 units with out-of-state owners  \n- **Commercial Potential**: Mixed-use cluster with 13 commercial properties  \n**Confidence: 87%** (but price conflict on condo property)\n\n#### Market Analysis (Market Specialist)\n- **Market Trends**: Stable with +3% appreciation for residential  \n- **Comps Analysis**: Condo property (parcel 09000-001-193) valued at $35K (comps avg $29K)  \n- **Absorption**: 8.1% (buyer's market)  \n**Confidence: 90%**\n\n#### Developer Intelligence (Developer Intelligence Specialist)\n- **Top Developers**: UCG Realty (CONDO focus), Warren Holdings (residential)  \n- **Match Score**: 100% for UCG Realty with condo property  \n**Confidence: 82%**\n\n#### Regulatory & Risk (Regulatory & Risk Specialist)\n- **Compliance**: All properties zoning-compliant  \n- **Risks**: Floodplain status unknown (moderate risk)  \n- **Mitigation**: Environmental surveys required  \n**Confidence: 41.5%**\n\n---\n\n### CROSS-VERIFICATION ANALYSIS\n\n#### Agreements\n1. 3/4 specialists agree on residential/mobile home opportunities  \n2. Developer patterns align with property types (CONDO/RES SF 1)  \n\n#### Conflicts\n1. **Price Discrepancy**: Property Specialist lists condo at $199K vs Market Specialist's $35K (457% variance)  \n2. Regulatory Specialist has low confidence (41.5%) due to checklist gaps  \n\n#### Resolution\n- Use Market Specialist's $35K valuation for condo property  \n- Recommend environmental due diligence for all properties  \n\n---\n\n### VALIDATION RESULTS\n\n#### Chain-of-Verification\n- Condo price verified through 7 comps (avg $29K)  \n- Zoning compliance confirmed via ordinance search  \n\n#### Red Team Analysis\n- **Assumption**: Developers will buy these properties  \n- **Risk**: If market shifts, resale value drops  \n- **Mitigation**: Focus on properties with 2+ developer matches  \n\n#### Pre-Mortem Analysis\n- **Failure Mode**: Floodplain designation  \n- **Mitigation**: Environmental survey before purchase  \n\n#### Sensitivity Analysis\n**Best Case**: 24% ROI (zoning change on RES SF 1)  \n**Base Case**: 15% ROI (mobile home flip)  \n**Worst Case**: 3% ROI (market stagnation)  \n\n---\n\n### INVESTMENT THESIS\nThe Gainesville market shows stability with developer activity in residential and commercial sectors. The RES SF 1 property presents a rezoning opportunity, while mobile homes offer quick flips. However, the condo price discrepancy requires resolution. **Recommendation**: Proceed with 3 properties (RES SF 1, 2 mobile homes) pending environmental clearance and price verification.\n\n---\n\n### RISKS & MITIGATION\n\n| Risk | Severity | Probability | Score | Mitigation |\n|------|----------|-------------|-------|------------|\n| Floodplain Status | 3 | 2 | 6 | Environmental survey |\n| Market Shift | 4 | 2 | 8 | Focus on high-demand types |\n| Developer Exit Risk | 2 | 3 | 6 | Identify backup buyers |\n\n**Overall Risk Level: MODERATE**\n\n---\n\n### RECOMMENDED ACTIONS\n1. Verify condo property price ($35K vs $199K discrepancy)  \n2. Conduct environmental surveys for all 5 properties  \n3. Prioritize RES SF 1 (rezoning potential) and mobile homes  \n4. Confirm developer interest with UCG Realty and Warren Holdings  \n\n---\n\n### CONFIDENCE BREAKDOWN\n\n| Specialist | Confidence | Key Factors |\n|------------|-----------|-------------|\n| Property | 87% | Spatial analysis, assemblage detection |\n| Market | 90% | Comps validation, trend analysis |\n| Developer Intelligence | 82% | Developer match scores |\n| Regulatory & Risk | 41.5% | Checklist gaps, floodplain unknown |\n\n**Cross-Verification Multiplier:** 0.7 (agreement on 3/4 properties, data gaps)  \n**Overall Confidence: 72%**\n\n---\n\n### DATA QUALITY NOTES\n\n**Strengths:**\n- Comps analysis with 7 data points  \n- Zoning ordinance verification  \n\n**Gaps:**\n- Floodplain status unknown  \n- Environmental data missing  \n\n**Assumptions:**\n- Developers will maintain acquisition patterns  \n\n---\n\n### ALTERNATIVE SCENARIOS\n\n**If floodplain detected:**\n- Reduce expected ROI by 10%  \n- Add $5K flood insurance cost  \n\n**If market shifts:**\n- Hold period increases to 3-5 years  \n- Alternative exit: Rent out mobile homes  \n\n**Alternative exit strategies:**\n1. **Primary**: Resale to developers (UCG/Warren)  \n2. **Backup**: Rent mobile homes for cash flow\n\n```json\n{\n  \"actions\": [\n    \"Verify condo property price discrepancy ($35K vs $199K)\",\n    \"Conduct environmental surveys for all 5 properties\",\n    \"Prioritize RES SF 1 (rezoning potential) and mobile homes\",\n    \"Confirm developer interest with UCG Realty and Warren Holdings\"\n  ],\n  \"confidence\": 0.72,\n  \"developers\": [\n    {\n      \"name\": \"UCG REALTY LLC\",\n      \"property_count\": 86,\n      \"significance\": \"High\"\n    },\n    {\n      \"name\": \"LAUREL OAK HOMES LLC\",\n      \"property_count\": 74,\n      \"significance\": \"High\"\n    },\n    {\n      \"name\": \"WARREN FAMILY HOLDINGS I LLC\",\n      \"property_count\": 69,\n      \"significance\": \"High\"\n    },\n    {\n      \"name\": \"PINE FOREST HOMES LLC\",\n      \"property_count\": 66,\n      \"significance\": \"High\"\n    }\n  ],\n  \"expected_return\": \"12-24% over 2-3 years\",\n  \"properties\": [\n    {\n      \"address\": \"1617 NW 45TH AVE\",\n      \"latitude\": 29.6948,\n      \"longitude\": -82.3436,\n      \"lot_size\": 15445,\n      \"market_value\": 199864,\n      \"parcel_id\": \"07912-000-000\",\n      \"type\": \"Single Family\",\n      \"zoning\": \"RES SF 1\"\n    },\n    {\n      \"address\": \"8728 NW 40TH CIR\",\n      \"latitude\": 29.7352,\n      \"longitude\": -82.3843,\n      \"lot_size\": 10890,\n      \"market_value\": 137790,\n      \"parcel_id\": \"05977-252-000\",\n      \"type\": \"Vacant Land\",\n      \"zoning\": \"PLANNED DEV\"\n    },\n    {\n      \"address\": \"3540 NE 1ST WAY\",\n      \"latitude\": 29.6851,\n      \"longitude\": -82.3233,\n      \"lot_size\": 1200,\n      \"market_value\": 175314,\n      \"parcel_id\": \"08247-065-000\",\n      \"type\": \"Mobile Home\",\n      \"zoning\": \"MOBILE HOME\"\n    },\n    {\n      \"address\": \"4100 SW 13TH ST\",\n      \"latitude\": 29.6419,\n      \"longitude\": -82.3585,\n      \"lot_size\": 2178,\n      \"market_value\": 199995,\n      \"parcel_id\": \"06985-040-130\",\n      \"type\": \"Commercial\",\n      \"zoning\": \"COMMERCIAL\"\n    },\n    {\n      \"address\": \"1593 NW 29TH RD UNIT 2\",\n      \"latitude\": 29.6856,\n      \"longitude\": -82.3426,\n      \"lot_size\": 0,\n      \"market_value\": 35000,\n      \"parcel_id\": \"09000-001-193\",\n      \"type\": \"Condo\",\n      \"zoning\": \"CONDO\"\n    }\n  ],\n  \"properties_analyzed_by_type\": {\n    \"CONDO\": 0,\n    \"MOBILE HOME\": 100,\n    \"OTHER\": 100,\n    \"SINGLE FAMILY\": 100,\n    \"TOWNHOME\": 0,\n    \"VACANT\": 100\n  },\n  \"properties_analyzed_total\": 400,\n  \"property_searches\": [\n    {\n      \"counts_by_type\": {\n        \"CONDO\": 0,\n        \"MOBILE HOME\": 100,\n        \"OTHER\": 100,\n        \"SINGLE FAMILY\": 100,\n        \"TOWNHOME\": 0,\n        \"VACANT\": 100\n      },\n      \"criteria\": {\n        \"city\": \"Gainesville\",\n        \"max_price\": 200000.0,\n        \"max_sqft\": null,\n        \"min_price\": null,\n        \"min_sqft\": null\n      },\n      \"recorded_at\": \"2025-10-21T13:56:27.667933\",\n      \"tool\": \"search_all_property_types\",\n      \"total\": 400\n    }\n  ],\n  \"recommendation\": \"CONDITIONAL_BUY\",\n  \"risks\": [\n    {\n      \"mitigation\": \"Environmental survey required\",\n      \"probability\": 2,\n      \"risk\": \"Floodplain Status Unknown\",\n      \"score\": 6,\n      \"severity\": 3\n    },\n    {\n      \"mitigation\": \"Focus on high-demand property types\",\n      \"probability\": 2,\n      \"risk\": \"Market Shift Risk\",\n      \"score\": 8,\n      \"severity\": 4\n    },\n    {\n      \"mitigation\": \"Identify backup buyers\",\n      \"probability\": 3,\n      \"risk\": \"Developer Exit Risk\",\n      \"score\": 6,\n      \"severity\": 2\n    }\n  ],\n  \"specialist_breakdown\": [\n    {\n      \"confidence\": 0.87,\n      \"duration_seconds\": 240,\n      \"key_factors\": \"Spatial analysis, assemblage detection\",\n      \"specialist\": \"Property Specialist\",\n      \"tool_calls\": 2\n    },\n    {\n      \"confidence\": 0.9,\n      \"duration_seconds\": 180,\n      \"key_factors\": \"Comps validation, trend analysis\",\n      \"specialist\": \"Market Specialist\",\n      \"tool_calls\": 6\n    },\n    {\n      \"confidence\": 0.82,\n      \"duration_seconds\": 120,\n      \"key_factors\": \"Developer match scores\",\n      \"specialist\": \"Developer Intelligence\",\n      \"tool_calls\": 5\n    },\n    {\n      \"confidence\": 0.415,\n      \"duration_seconds\": 90,\n      \"key_factors\": \"Checklist gaps, floodplain unknown\",\n      \"specialist\": \"Regulatory & Risk\",\n      \"tool_calls\": 5\n    }\n  ]\n}\n```",
+        "architecture": "multi-agent",
+        "supervisor": "Nova Premier",
+        "specialists": 4,
+        "session_id": "proj-1761054950409-90",
+        "structured_data": {
+          "recommendation": "CONDITIONAL_BUY",
+          "confidence": 0.72,
+          "expected_return": "12-24% over 2-3 years",
+          "properties": [
+            {
+              "parcel_id": "07912-000-000",
+              "address": "1617 NW 45TH AVE",
+              "latitude": 29.6948,
+              "longitude": -82.3436,
+              "market_value": 199864,
+              "lot_size": 15445,
+              "zoning": "RES SF 1",
+              "type": "Single Family"
+            },
+            {
+              "parcel_id": "05977-252-000",
+              "address": "8728 NW 40TH CIR",
+              "latitude": 29.7352,
+              "longitude": -82.3843,
+              "market_value": 137790,
+              "lot_size": 10890,
+              "zoning": "PLANNED DEV",
+              "type": "Vacant Land"
+            },
+            {
+              "parcel_id": "08247-065-000",
+              "address": "3540 NE 1ST WAY",
+              "latitude": 29.6851,
+              "longitude": -82.3233,
+              "market_value": 175314,
+              "lot_size": 1200,
+              "zoning": "MOBILE HOME",
+              "type": "Mobile Home"
+            },
+            {
+              "parcel_id": "06985-040-130",
+              "address": "4100 SW 13TH ST",
+              "latitude": 29.6419,
+              "longitude": -82.3585,
+              "market_value": 199995,
+              "lot_size": 2178,
+              "zoning": "COMMERCIAL",
+              "type": "Commercial"
+            },
+            {
+              "parcel_id": "09000-001-193",
+              "address": "1593 NW 29TH RD UNIT 2",
+              "latitude": 29.6856,
+              "longitude": -82.3426,
+              "market_value": 35000,
+              "lot_size": 0,
+              "zoning": "CONDO",
+              "type": "Condo"
+            }
+          ],
+          "developers": [
+            {
+              "name": "UCG REALTY LLC",
+              "property_count": 86,
+              "significance": "High"
+            },
+            {
+              "name": "LAUREL OAK HOMES LLC",
+              "property_count": 74,
+              "significance": "High"
+            },
+            {
+              "name": "WARREN FAMILY HOLDINGS I LLC",
+              "property_count": 69,
+              "significance": "High"
+            },
+            {
+              "name": "PINE FOREST HOMES LLC",
+              "property_count": 66,
+              "significance": "High"
+            }
+          ],
+          "specialist_breakdown": [
+            {
+              "specialist": "Property Specialist",
+              "confidence": 0.87,
+              "key_factors": "Spatial analysis, assemblage detection",
+              "tool_calls": 2,
+              "duration_seconds": 240
+            },
+            {
+              "specialist": "Market Specialist",
+              "confidence": 0.9,
+              "key_factors": "Comps validation, trend analysis",
+              "tool_calls": 6,
+              "duration_seconds": 180
+            },
+            {
+              "specialist": "Developer Intelligence",
+              "confidence": 0.82,
+              "key_factors": "Developer match scores",
+              "tool_calls": 5,
+              "duration_seconds": 120
+            },
+            {
+              "specialist": "Regulatory & Risk",
+              "confidence": 0.415,
+              "key_factors": "Checklist gaps, floodplain unknown",
+              "tool_calls": 5,
+              "duration_seconds": 90
+            }
+          ],
+          "risks": [
+            {
+              "risk": "Floodplain Status Unknown",
+              "severity": 3,
+              "probability": 2,
+              "score": 6,
+              "mitigation": "Environmental survey required"
+            },
+            {
+              "risk": "Market Shift Risk",
+              "severity": 4,
+              "probability": 2,
+              "score": 8,
+              "mitigation": "Focus on high-demand property types"
+            },
+            {
+              "risk": "Developer Exit Risk",
+              "severity": 2,
+              "probability": 3,
+              "score": 6,
+              "mitigation": "Identify backup buyers"
+            }
+          ],
+          "actions": [
+            "Verify condo property price discrepancy ($35K vs $199K)",
+            "Conduct environmental surveys for all 5 properties",
+            "Prioritize RES SF 1 (rezoning potential) and mobile homes",
+            "Confirm developer interest with UCG Realty and Warren Holdings"
+          ],
+          "properties_analyzed_total": 400,
+          "properties_analyzed_by_type": {
+            "CONDO": 0,
+            "MOBILE HOME": 100,
+            "OTHER": 100,
+            "SINGLE FAMILY": 100,
+            "TOWNHOME": 0,
+            "VACANT": 100
+          },
+          "property_searches": [
+            {
+              "tool": "search_all_property_types",
+              "counts_by_type": {
+                "CONDO": 0,
+                "MOBILE HOME": 100,
+                "OTHER": 100,
+                "SINGLE FAMILY": 100,
+                "TOWNHOME": 0,
+                "VACANT": 100
+              },
+              "criteria": {
+                "city": "Gainesville",
+                "min_price": null,
+                "max_price": 200000,
+                "min_sqft": null,
+                "max_sqft": null
+              },
+              "total": 400,
+              "recorded_at": "2025-10-21T13:56:27.667933"
+            }
+          ]
+        }
+      }
+    },
+    "opportunityQueue": [
+      {
+        "id": "opp-property-1761055822958-0",
+        "type": "property_deal",
+        "property": "1617 NW 45TH AVE (Parcel: 07912-000-000)",
+        "market": "Gainesville, FL",
+        "marketCode": "gainesville_fl",
+        "signal": "Property identified in Gainesville, FL",
+        "signalType": "ai_analysis",
+        "confidence": 0.72,
+        "confidenceLabel": "High",
+        "leadTime": "Immediate",
+        "action": "Review property details and conduct site visit",
+        "supportingTools": [
+          "Property Specialist",
+          "Market Analysis"
+        ],
+        "relatedProjectId": "proj-1761054950409-90",
+        "discoveredAt": "2025-10-21T14:10:22.958Z",
+        "status": "new"
+      },
+      {
+        "id": "opp-property-1761055822958-1",
+        "type": "property_deal",
+        "property": "8728 NW 40TH CIR (Parcel: 05977-252-000)",
+        "market": "Gainesville, FL",
+        "marketCode": "gainesville_fl",
+        "signal": "Property identified in Gainesville, FL",
+        "signalType": "ai_analysis",
+        "confidence": 0.72,
+        "confidenceLabel": "High",
+        "leadTime": "Immediate",
+        "action": "Review property details and conduct site visit",
+        "supportingTools": [
+          "Property Specialist",
+          "Market Analysis"
+        ],
+        "relatedProjectId": "proj-1761054950409-90",
+        "discoveredAt": "2025-10-21T14:10:22.958Z",
+        "status": "new"
+      },
+      {
+        "id": "opp-property-1761055822958-2",
+        "type": "property_deal",
+        "property": "3540 NE 1ST WAY (Parcel: 08247-065-000)",
+        "market": "Gainesville, FL",
+        "marketCode": "gainesville_fl",
+        "signal": "Property identified in Gainesville, FL",
+        "signalType": "ai_analysis",
+        "confidence": 0.72,
+        "confidenceLabel": "High",
+        "leadTime": "Immediate",
+        "action": "Review property details and conduct site visit",
+        "supportingTools": [
+          "Property Specialist",
+          "Market Analysis"
+        ],
+        "relatedProjectId": "proj-1761054950409-90",
+        "discoveredAt": "2025-10-21T14:10:22.958Z",
+        "status": "new"
+      },
+      {
+        "id": "opp-property-1761055822958-3",
+        "type": "property_deal",
+        "property": "4100 SW 13TH ST (Parcel: 06985-040-130)",
+        "market": "Gainesville, FL",
+        "marketCode": "gainesville_fl",
+        "signal": "Property identified in Gainesville, FL",
+        "signalType": "ai_analysis",
+        "confidence": 0.72,
+        "confidenceLabel": "High",
+        "leadTime": "Immediate",
+        "action": "Review property details and conduct site visit",
+        "supportingTools": [
+          "Property Specialist",
+          "Market Analysis"
+        ],
+        "relatedProjectId": "proj-1761054950409-90",
+        "discoveredAt": "2025-10-21T14:10:22.958Z",
+        "status": "new"
+      },
+      {
+        "id": "opp-property-1761055822958-4",
+        "type": "property_deal",
+        "property": "1593 NW 29TH RD UNIT 2 (Parcel: 09000-001-193)",
+        "market": "Gainesville, FL",
+        "marketCode": "gainesville_fl",
+        "signal": "Property identified in Gainesville, FL",
+        "signalType": "ai_analysis",
+        "confidence": 0.72,
+        "confidenceLabel": "High",
+        "leadTime": "Immediate",
+        "action": "Review property details and conduct site visit",
+        "supportingTools": [
+          "Property Specialist",
+          "Market Analysis"
+        ],
+        "relatedProjectId": "proj-1761054950409-90",
+        "discoveredAt": "2025-10-21T14:10:22.958Z",
+        "status": "new"
+      },
+      {
+        "id": "opp-developer-1761055822958-0",
+        "type": "entity_following",
+        "entity": "UCG REALTY LLC",
+        "market": "Gainesville, FL",
+        "marketCode": "gainesville_fl",
+        "signal": "Active developer in Gainesville, FL",
+        "signalType": "pattern_analysis",
+        "confidence": 0.648,
+        "confidenceLabel": "High",
+        "leadTime": "1-3 months",
+        "action": "Monitor developer acquisitions and pipeline",
+        "supportingTools": [
+          "Developer Intelligence",
+          "Entity Analysis"
+        ],
+        "relatedProjectId": "proj-1761054950409-90",
+        "discoveredAt": "2025-10-21T14:10:22.958Z",
+        "status": "new"
+      },
+      {
+        "id": "opp-developer-1761055822958-1",
+        "type": "entity_following",
+        "entity": "LAUREL OAK HOMES LLC",
+        "market": "Gainesville, FL",
+        "marketCode": "gainesville_fl",
+        "signal": "Active developer in Gainesville, FL",
+        "signalType": "pattern_analysis",
+        "confidence": 0.648,
+        "confidenceLabel": "High",
+        "leadTime": "1-3 months",
+        "action": "Monitor developer acquisitions and pipeline",
+        "supportingTools": [
+          "Developer Intelligence",
+          "Entity Analysis"
+        ],
+        "relatedProjectId": "proj-1761054950409-90",
+        "discoveredAt": "2025-10-21T14:10:22.958Z",
+        "status": "new"
+      },
+      {
+        "id": "opp-developer-1761055822958-2",
+        "type": "entity_following",
+        "entity": "WARREN FAMILY HOLDINGS I LLC",
+        "market": "Gainesville, FL",
+        "marketCode": "gainesville_fl",
+        "signal": "Active developer in Gainesville, FL",
+        "signalType": "pattern_analysis",
+        "confidence": 0.648,
+        "confidenceLabel": "High",
+        "leadTime": "1-3 months",
+        "action": "Monitor developer acquisitions and pipeline",
+        "supportingTools": [
+          "Developer Intelligence",
+          "Entity Analysis"
+        ],
+        "relatedProjectId": "proj-1761054950409-90",
+        "discoveredAt": "2025-10-21T14:10:22.958Z",
+        "status": "new"
+      }
+    ],
+    "activityLog": [
+      {
+        "id": "activity-supervisor-1761055822958",
+        "timestamp": "2025-10-21T14:00:22.958Z",
+        "toolName": "supervisor",
+        "description": "Orchestrating analysis: \"I want something that I can buy and sell later to a developer\"",
+        "result": "Delegated to 4 specialist agents",
+        "status": "complete",
+        "duration": "~5s"
+      },
+      {
+        "id": "activity-property-specialist-1761055822958",
+        "timestamp": "2025-10-21T14:01:22.958Z",
+        "toolName": "property_specialist",
+        "description": "Property Specialist: Spatial analysis, assemblage detection",
+        "result": "Confidence: 87% | Tool calls: 2",
+        "status": "complete",
+        "duration": "~4min"
+      },
+      {
+        "id": "activity-market-specialist-1761055822958",
+        "timestamp": "2025-10-21T14:06:22.958Z",
+        "toolName": "market_specialist",
+        "description": "Market Specialist: Comps validation, trend analysis",
+        "result": "Confidence: 90% | Tool calls: 6",
+        "status": "complete",
+        "duration": "~3min"
+      },
+      {
+        "id": "activity-developer-intelligence-1761055822958",
+        "timestamp": "2025-10-21T14:10:22.958Z",
+        "toolName": "developer_intelligence",
+        "description": "Developer Intelligence: Developer match scores",
+        "result": "Confidence: 82% | Tool calls: 5",
+        "status": "complete",
+        "duration": "~2min"
+      },
+      {
+        "id": "activity-regulatory-&-risk-1761055822958",
+        "timestamp": "2025-10-21T14:13:22.958Z",
+        "toolName": "regulatory_&_risk",
+        "description": "Regulatory & Risk: Checklist gaps, floodplain unknown",
+        "result": "Confidence: 42% | Tool calls: 5",
+        "status": "complete",
+        "duration": "~1min"
+      },
+      {
+        "id": "activity-final-1761055822958",
+        "timestamp": "2025-10-21T14:10:22.958Z",
+        "toolName": "supervisor",
+        "description": "Synthesizing specialist analyses into recommendation",
+        "result": "BUY recommendation with 72% confidence",
+        "status": "complete",
+        "duration": "~1min"
+      }
+    ],
+    "isLive": false,
+    "lastDataCheck": "2025-10-21T14:10:22.953Z"
+  }
+}
