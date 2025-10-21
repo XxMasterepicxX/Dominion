@@ -1,4 +1,4 @@
-import type { DashboardState, ProjectSetup, ProjectSummary } from '../types/dashboard';
+import type { DashboardState, MarketMarker, ProjectSetup, ProjectSummary, PropertyDetail } from '../types/dashboard';
 import { mockDashboardState } from '../stubs/mockDashboardState';
 import { mockProjects } from '../stubs/mockProjects';
 import { parseAgentMarkdown } from '../utils/markdownParser';
@@ -9,6 +9,7 @@ const DEFAULT_PROJECT_ID = 'proj-123';
 // Vite exposes env vars on import.meta.env in the browser; fall back to process.env for node environments
 const getEnv = (key: string) => (typeof (import.meta as any) !== 'undefined' ? (import.meta as any).env?.[key] : (process as any)?.env?.[key]);
 const API_BASE_URL = (getEnv('REACT_APP_API_BASE_URL') as string | undefined)?.replace(/\/$/, '') ?? '';
+const API_ENABLED = API_BASE_URL.length > 0;
 
 // AWS AgentCore endpoint (Lambda Function URL - now public for demo)
 const AGENT_URL = (getEnv('VITE_AGENT_URL') as string | undefined) || '';
@@ -24,6 +25,10 @@ export async function fetchDashboardState(
   options: FetchDashboardStateOptions = {},
 ): Promise<DashboardState> {
   const { projectId = DEFAULT_PROJECT_ID, signal } = options;
+  if (!API_ENABLED) {
+    console.warn('[dashboard] API disabled, using mock dashboard state');
+    return clone(mockDashboardState);
+  }
   const endpoint = `${API_BASE_URL}/api/projects/${projectId}/report`.replace('//api', '/api');
 
   try {
@@ -76,35 +81,59 @@ type CachedReportEnvelope = {
  * This saves the dashboard state to localStorage so the Dashboard page can load it by projectId.
  */
 export async function importReportFromJson(report: any, filename?: string): Promise<ProjectSummary> {
+  // Normalize to dashboard state shape (exported reports embed state under `state`)
+  const dashboardState = report?.state && report.state.project ? report.state : report;
+
   // Determine project id
-  const projectId = report?.project?.id || (filename ? filename.replace(/\.json$/i, '') : `proj-${Date.now()}`);
+  const projectId =
+    dashboardState?.project?.id ||
+    report?.project?.id ||
+    (filename ? filename.replace(/\.json$/i, '') : `proj-${Date.now()}`);
 
   const now = new Date().toISOString();
 
   // Build a minimal ProjectSummary to show in Projects list
   const summary: ProjectSummary = {
     id: projectId,
-    name: report?.project?.name || `Imported report ${projectId}`,
-    type: (report?.project?.type as any) || 'market_research',
-    market: report?.project?.market || (report?.reportContent?.marketContext || 'Imported market'),
-    marketCode: report?.project?.marketCode || undefined,
+    name: dashboardState?.project?.name || report?.project?.name || `Imported report ${projectId}`,
+    type: (dashboardState?.project?.type as any) || (report?.project?.type as any) || 'market_research',
+    market:
+      dashboardState?.project?.market ||
+      report?.project?.market ||
+      dashboardState?.reportContent?.marketContext ||
+      report?.reportContent?.marketContext ||
+      'Imported market',
+    marketCode: dashboardState?.project?.marketCode || report?.project?.marketCode || undefined,
     status: 'complete',
     progress: 100,
     createdAt: now,
     lastUpdated: now,
-    description: report?.reportContent?.summary || report?.project?.name || 'Imported Dominion report',
-    confidence: report?.reportContent?.confidence ?? report?.project?.confidence ?? undefined,
-    opportunities: report?.opportunityQueue?.length ?? 0,
+    description:
+      dashboardState?.reportContent?.summary ||
+      report?.reportContent?.summary ||
+      dashboardState?.project?.name ||
+      report?.project?.name ||
+      'Imported Dominion report',
+    confidence:
+      dashboardState?.reportContent?.confidence ??
+      report?.reportContent?.confidence ??
+      dashboardState?.project?.confidence ??
+      report?.project?.confidence ??
+      undefined,
+    opportunities: dashboardState?.opportunityQueue?.length ?? report?.opportunityQueue?.length ?? 0,
   };
 
   try {
     const envelope: CachedReportEnvelope = {
       version: REPORT_CACHE_VERSION,
       savedAt: Date.now(),
-      state: report,
+      state: dashboardState,
     };
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.setItem(`${REPORT_CACHE_PREFIX}${projectId}`, JSON.stringify(envelope));
+    }
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.setItem(`${REPORT_CACHE_PREFIX}${projectId}`, JSON.stringify(envelope));
     }
   } catch (e) {
     console.warn('[dashboard] failed to persist imported report to localStorage', e);
@@ -159,6 +188,10 @@ type FetchProjectsOptions = {
 
 export async function fetchProjects(options: FetchProjectsOptions = {}): Promise<ProjectSummary[]> {
   const { signal } = options;
+  if (!API_ENABLED) {
+    console.warn('[dashboard] API disabled, returning mock projects');
+    return clone(mockProjects);
+  }
   const endpoint = `${API_BASE_URL}/api/projects`.replace('//api', '/api');
 
   try {
@@ -180,6 +213,31 @@ export interface CreateProjectResponse {
 }
 
 export async function createProject(setup: ProjectSetup): Promise<CreateProjectResponse> {
+  if (!API_ENABLED) {
+    console.warn('[dashboard] API disabled, using mock project create fallback');
+    const id = `proj-${Math.floor(Math.random() * 10000)}`;
+    const now = new Date().toISOString();
+    const summary: ProjectSummary = {
+      id,
+      name: setup.name,
+      type: setup.type,
+      market: setup.market,
+      marketCode: setup.marketCode ?? setup.market.toLowerCase().replace(/\s+/g, '_'),
+      status: 'generating',
+      progress: 12,
+      createdAt: now,
+      lastUpdated: now,
+      description:
+        setup.strategy ??
+        setup.entityName ??
+        setup.propertyId ??
+        'Dominion report is being generated with your selected scope.',
+      confidence: undefined,
+      opportunities: 0,
+    };
+    mockProjects.unshift(summary);
+    return { project: summary };
+  }
   const endpoint = `${API_BASE_URL}/api/projects`.replace('//api', '/api');
   try {
     const response = await fetch(endpoint, {
@@ -241,6 +299,24 @@ export interface AgentResponse {
       lot_size?: number;
       zoning?: string;
       type?: string;
+      owner?: string;
+      owner_type?: string;
+      last_sale_date?: string;
+      last_sale_price?: number;
+      confidence?: number;
+      highlights?: string[];
+      notes?: string;
+      metadata?: Record<string, unknown>;
+      details?: Record<string, unknown>;
+    }>;
+    properties_analyzed_total?: number;
+    properties_analyzed_by_type?: Record<string, number>;
+    property_searches?: Array<{
+      tool: string;
+      total: number;
+      counts_by_type: Record<string, number>;
+      criteria?: Record<string, unknown>;
+      recorded_at?: string;
     }>;
     developers?: Array<{
       name: string;
@@ -331,6 +407,7 @@ export async function analyzeWithAgent(
         session_id: agentResponse.session_id,
         message_length: agentResponse.message?.length || 0,
         has_structured_data: !!agentResponse.structured_data,
+        properties_analyzed_total: agentResponse.structured_data?.properties_analyzed_total ?? null,
         properties_count: agentResponse.structured_data?.properties?.length || 0,
       });
 
@@ -376,10 +453,18 @@ function buildReportContent(
   projectId: string,
   message: string,
   confidence: number,
-  isBuyRecommendation: boolean
+  recommendation: string,
+  isBuyRecommendation: boolean,
+  isRejection: boolean
 ): DashboardState['reportContent'] {
   // Parse the markdown into structured sections
   const parsed = parseAgentMarkdown(message);
+  const structured = agentResponse.structured_data || {};
+  const normalizedRecommendation = recommendation || parsed.executiveSummary.recommendation || 'UNKNOWN';
+  const expectedReturn = structured.expected_return || parsed.executiveSummary.expectedReturn;
+  const totalAnalyzed = typeof structured.properties_analyzed_total === 'number'
+    ? structured.properties_analyzed_total
+    : structured.properties?.length ?? 0;
 
   // Build sections from parsed markdown
   const sections: Array<{ title: string; content: string; metrics?: Array<{ label: string; value: string; highlight?: boolean }> }> = [];
@@ -392,17 +477,17 @@ function buildReportContent(
       metrics: [
         {
           label: 'Recommendation',
-          value: parsed.executiveSummary.recommendation,
-          highlight: parsed.executiveSummary.recommendation === 'BUY' || parsed.executiveSummary.recommendation === 'CONDITIONAL BUY',
+          value: normalizedRecommendation,
+          highlight: normalizedRecommendation.includes('BUY'),
         },
         {
           label: 'Confidence',
-          value: `${Math.round(parsed.executiveSummary.confidence * 100)}%`,
-          highlight: parsed.executiveSummary.confidence > 0.7,
+          value: `${Math.round(confidence * 100)}%`,
+          highlight: confidence > 0.7,
         },
-        ...(parsed.executiveSummary.expectedReturn ? [{
+        ...(expectedReturn ? [{
           label: 'Expected Return',
-          value: parsed.executiveSummary.expectedReturn,
+          value: expectedReturn,
           highlight: true,
         }] : []),
       ],
@@ -420,7 +505,27 @@ function buildReportContent(
           value: `${Math.round(parsed.keyFindings.property.confidence * 100)}%`,
           highlight: parsed.keyFindings.property.confidence > 0.7,
         },
+        ...(totalAnalyzed > 0 ? [{
+          label: 'Properties Analyzed',
+          value: `${totalAnalyzed}`,
+          highlight: totalAnalyzed > 100,
+        }] : []),
       ],
+    });
+  }
+
+  const analyzedByType = structured.properties_analyzed_by_type;
+  if (analyzedByType && Object.keys(analyzedByType).length > 0) {
+    sections.push({
+      title: 'Property Coverage',
+      content: `Analyzed ${totalAnalyzed} properties across asset classes.`,
+      metrics: Object.entries(analyzedByType).map(([type, count]) => ({
+        label: type === 'None' || type === 'UNKNOWN'
+          ? 'All Types'
+          : type.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+        value: `${count}`,
+        highlight: Number(count) > 75,
+      })),
     });
   }
 
@@ -552,18 +657,24 @@ function buildReportContent(
       ? agentResponse.structured_data.actions
       : parsed.recommendedActions && parsed.recommendedActions.length > 0
         ? parsed.recommendedActions
-        : isBuyRecommendation
+        : isRejection
           ? [
-              'Review detailed property list',
-              'Contact identified developers',
-              'Conduct on-site property inspections',
-              'Verify zoning and permits',
+              'Re-run Market Specialist analysis with actual sale prices',
+              'Calculate Fair Sales Difference (FSD) for each parcel',
+              'Attach updated cash flow projections before resubmitting',
             ]
-          : [
-              'Review analysis for data gaps',
-              'Consider adjusting search criteria',
-              'Explore alternative markets',
-            ],
+          : isBuyRecommendation
+            ? [
+                'Review detailed property list',
+                'Contact identified developers',
+                'Conduct on-site property inspections',
+                'Verify zoning and permits',
+              ]
+            : [
+                'Review analysis for data gaps',
+                'Consider adjusting search criteria',
+                'Explore alternative markets',
+              ],
     sources: {
       tools: ['Multi-Agent System', 'Property Specialist', 'Market Specialist', 'Developer Intelligence', 'Regulatory & Risk Specialist'],
       databases: ['Aurora PostgreSQL (108K properties, 89K entities, 5K ordinances)'],
@@ -590,54 +701,256 @@ export function transformAgentResponseToDashboard(
 ): DashboardState {
   const now = new Date().toISOString();
   const message = agentResponse.message || '';
+  const structured = agentResponse.structured_data || {};
+  const normalizedMessage = message.toLowerCase();
+  const isRejection = normalizedMessage.includes('rejection notice');
 
-  // Parse recommendation from message
-  const isBuyRecommendation = message.toUpperCase().includes('BUY') &&
-                              !message.toUpperCase().includes('DO NOT BUY') &&
-                              !message.toUpperCase().includes('PASS');
+  // Determine recommendation (prefer structured data, then explicit markdown, finally fallback)
+  const structuredRecommendation = structured.recommendation?.toUpperCase()?.trim();
+  const recommendationMatch = message.match(/\*\*Recommendation:\s*([A-Z\s]+)\*\*/i);
+  const parsedRecommendation = recommendationMatch ? recommendationMatch[1].trim().toUpperCase() : undefined;
+  const recommendation = (structuredRecommendation && structuredRecommendation !== 'UNKNOWN'
+    ? structuredRecommendation
+    : parsedRecommendation) || (isRejection ? 'REVIEW REQUIRED' : 'PASS');
 
-  // Extract confidence (look for patterns like "confidence: 75%" or "75% confidence")
+  const isBuyRecommendation = !isRejection && (recommendation.includes('BUY') || recommendation.includes('ACQUIRE'));
+
+  // Resolve confidence (structured value > parsed markdown > fallback default)
   const confidenceMatch = message.match(/(?:confidence|conf)[:\s]+(\d+)%/i) ||
-                         message.match(/(\d+)%\s+confidence/i);
-  const confidence = confidenceMatch ? parseFloat(confidenceMatch[1]) / 100 : 0.5;
+    message.match(/(\d+)%\s+confidence/i);
+  const confidence = typeof structured.confidence === 'number'
+    ? structured.confidence
+    : confidenceMatch
+      ? parseFloat(confidenceMatch[1]) / 100
+      : 0.5;
 
-  // Extract key numbers from message
+  const confidenceLabel = confidence > 0.66 ? 'High' : confidence > 0.33 ? 'Medium' : 'Low';
+
+  // Aggregate property/developer counts from structured data with legacy fallback
+  const structuredProperties = structured.properties || [];
+  const structuredDevelopers = structured.developers || [];
+
+  const firstNumber = (...values: unknown[]): number | undefined => {
+    for (const value of values) {
+      if (typeof value === 'number' && !Number.isNaN(value)) {
+        return value;
+      }
+    }
+    return undefined;
+  };
+
+  const firstString = (...values: unknown[]): string | undefined => {
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value;
+      }
+    }
+    return undefined;
+  };
+
+  const firstStringArray = (...values: unknown[]): string[] | undefined => {
+    for (const value of values) {
+      if (Array.isArray(value) && value.length > 0) {
+        return value as string[];
+      }
+    }
+    return undefined;
+  };
+
+  const propertyDetails: Record<string, PropertyDetail> = {};
+  structuredProperties.forEach((prop) => {
+    const parcelId = (prop as any)?.parcel_id ?? (prop as any)?.parcelId;
+    if (!parcelId || typeof parcelId !== 'string') {
+      return;
+    }
+
+    const detailsSource =
+      (prop as any)?.details && typeof (prop as any)?.details === 'object'
+        ? ((prop as any).details as Record<string, any>)
+        : {};
+
+    const metadataSource =
+      (prop as any)?.metadata && typeof (prop as any)?.metadata === 'object'
+        ? ((prop as any).metadata as Record<string, any>)
+        : undefined;
+
+    const lotSizeSqft = firstNumber(
+      (prop as any)?.lot_size_sqft,
+      (prop as any)?.lot_size_sq_ft,
+      (prop as any)?.lot_size,
+      detailsSource?.lot_size_sqft,
+      detailsSource?.lot_size_sq_ft,
+      detailsSource?.lot_size,
+    );
+
+    const acreage = firstNumber(
+      (prop as any)?.acreage,
+      detailsSource?.acreage,
+      typeof lotSizeSqft === 'number' ? parseFloat((lotSizeSqft / 43560).toFixed(2)) : undefined,
+    );
+
+    const highlights = firstStringArray(
+      (prop as any)?.highlights,
+      detailsSource?.highlights,
+    );
+
+    const metadata =
+      metadataSource && Object.keys(metadataSource).length > 0
+        ? metadataSource
+        : Object.keys(detailsSource).length > 0
+          ? detailsSource
+          : undefined;
+
+    const detail: PropertyDetail = {
+      parcelId,
+      address: firstString(prop.address, detailsSource?.address) ?? parcelId,
+      propertyType: firstString(
+        (prop as any)?.property_type,
+        (prop as any)?.type,
+        detailsSource?.property_type,
+        detailsSource?.propertyType,
+      ),
+      zoning: firstString(
+        (prop as any)?.zoning,
+        (prop as any)?.zoning_code,
+        detailsSource?.zoning,
+      ),
+      lotSizeSqft,
+      acreage,
+      marketValue: firstNumber(
+        (prop as any)?.market_value,
+        (prop as any)?.marketValue,
+        detailsSource?.market_value,
+        detailsSource?.marketValue,
+      ),
+      assessedValue: firstNumber(
+        (prop as any)?.assessed_value,
+        detailsSource?.assessed_value,
+        detailsSource?.assessedValue,
+      ),
+      owner: firstString(
+        (prop as any)?.owner,
+        (prop as any)?.owner_name,
+        detailsSource?.owner,
+        detailsSource?.owner_name,
+      ),
+      ownerType: firstString(
+        (prop as any)?.owner_type,
+        detailsSource?.owner_type,
+      ),
+      lastSaleDate: firstString(
+        (prop as any)?.last_sale_date,
+        (prop as any)?.sale_date,
+        detailsSource?.last_sale_date,
+        detailsSource?.sale_date,
+      ),
+      lastSalePrice: firstNumber(
+        (prop as any)?.last_sale_price,
+        (prop as any)?.sale_price,
+        detailsSource?.last_sale_price,
+        detailsSource?.sale_price,
+      ),
+      confidence: typeof (prop as any)?.confidence === 'number' ? (prop as any).confidence : undefined,
+      aiSummary: firstString(
+        (prop as any)?.notes,
+        detailsSource?.ai_summary,
+        detailsSource?.summary,
+      ),
+      highlights,
+      metadata,
+    };
+
+    propertyDetails[parcelId] = detail;
+  });
+
   const propertiesMatch = message.match(/(\d+)\s+(?:properties|property)/i);
   const developersMatch = message.match(/(\d+)\s+(?:developers|developer|entities|entity)/i);
 
-  const propertiesFound = propertiesMatch ? parseInt(propertiesMatch[1]) : 0;
-  const developersFound = developersMatch ? parseInt(developersMatch[1]) : 0;
+  const totalPropertiesAnalyzed = typeof structured.properties_analyzed_total === 'number'
+    ? structured.properties_analyzed_total
+    : propertiesMatch
+      ? parseInt(propertiesMatch[1], 10)
+      : structuredProperties.length;
+
+  const propertiesRecommended = structuredProperties.length;
+
+  const developersFound = structuredDevelopers.length > 0
+    ? structuredDevelopers.length
+    : developersMatch
+      ? parseInt(developersMatch[1], 10)
+      : 0;
 
   // Create summary from first paragraph or first 200 chars
-  const firstParagraph = message.split('\n\n')[0] || message.substring(0, 200);
+  const firstParagraph = message.split(/\n\n+/)[0] || message.substring(0, 200);
 
-  // Build markets array from structured data (if available) or fallback to city center
-  const structuredProps = agentResponse.structured_data?.properties || [];
-  const markets = structuredProps.length > 0
-    ? structuredProps.map(prop => ({
-        location: [prop.longitude, prop.latitude] as [number, number],
+  const confidenceTierLabel = (value?: number) => {
+    if (typeof value === 'number') {
+      if (value > 0.66) return 'High';
+      if (value > 0.33) return 'Medium';
+      return 'Low';
+    }
+    return confidenceLabel;
+  };
+
+  const propertyMarkers = structuredProperties.flatMap((prop) => {
+    const parcelId = (prop as any)?.parcel_id ?? (prop as any)?.parcelId;
+    const lat = Number((prop as any)?.latitude);
+    const lon = Number((prop as any)?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return [];
+    }
+    const detail = parcelId ? propertyDetails[parcelId] : undefined;
+    const markerConfidence = detail?.confidence ?? confidence;
+    return [
+      {
+        location: [lat, lon] as [number, number],
         size: 0.08,
-        label: prop.address,
+        label: prop.address ?? detail?.address ?? parcelId ?? setup.market,
         marketCode: setup.marketCode || setup.market.toLowerCase().replace(/\s+/g, '_'),
         properties: 1,
         entities: developersFound,
-        activeEntities: 0,
-        confidence,
-        confidenceLabel: confidence > 0.66 ? 'High' : confidence > 0.33 ? 'Medium' : 'Low',
-      }))
+        activeEntities: Math.min(developersFound, Math.max(0, Math.floor(developersFound * 0.6))),
+        confidence: markerConfidence,
+        confidenceLabel: confidenceTierLabel(detail?.confidence),
+        parcelId,
+        propertyType: detail?.propertyType,
+        marketValue: detail?.marketValue,
+      } satisfies MarketMarker,
+    ];
+  });
+
+  // Build markets array from structured data (if available) or fallback to city center
+  const markets = propertyMarkers.length > 0
+    ? propertyMarkers
     : [
         {
           location: getMarketCoordinates(setup.market),
           size: 0.15,
           label: setup.market,
           marketCode: setup.marketCode || setup.market.toLowerCase().replace(/\s+/g, '_'),
-          properties: propertiesFound,
+          properties: totalPropertiesAnalyzed,
           entities: developersFound,
-          activeEntities: Math.floor(developersFound * 0.6),
+          activeEntities: Math.min(developersFound, Math.max(0, Math.floor(developersFound * 0.6))),
           confidence,
-          confidenceLabel: confidence > 0.66 ? 'High' : confidence > 0.33 ? 'Medium' : 'Low',
+          confidenceLabel,
         },
       ];
+
+  // Determine focus card tagging
+  let focusTag = recommendation;
+  let focusTagType: 'success' | 'warning' | 'info' = 'info';
+  if (isRejection) {
+    focusTag = 'REVIEW REQUIRED';
+    focusTagType = 'warning';
+  } else if (isBuyRecommendation) {
+    focusTagType = 'success';
+  } else if (focusTag.includes('PASS')) {
+    focusTagType = 'info';
+  } else {
+    focusTagType = 'warning';
+  }
+
+  const pluralize = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
   return {
     project: {
@@ -651,31 +964,31 @@ export function transformAgentResponseToDashboard(
       isLive: false,
       updateCount: 1,
       confidence,
-      opportunities: isBuyRecommendation ? Math.max(propertiesFound, 1) : 0,
+      opportunities: isBuyRecommendation ? Math.max(propertiesRecommended, 1) : 0,
     },
     latestUpdates: [
       {
         id: `update-${Date.now()}`,
-        title: 'AI Analysis Complete',
-        detail: isBuyRecommendation
-          ? `Found ${propertiesFound} properties matching criteria`
-          : 'Analysis complete - see report for details',
+        title: isRejection ? 'Analysis Rejected' : 'AI Analysis Complete',
+        detail: isRejection
+          ? 'Market Specialist must re-submit analysis with required sale data'
+          : `Analyzed ${pluralize(totalPropertiesAnalyzed, 'property')}${propertiesRecommended > 0 ? `; highlighted ${propertiesRecommended}` : ''}`,
         timestamp: now,
-        updateType: 'new_opportunity',
+        updateType: isRejection ? 'alert' : 'new_opportunity',
         status: 'new',
         relatedProjectId: projectId,
-        impact: isBuyRecommendation ? 'positive' : 'neutral',
+        impact: isRejection ? 'negative' : isBuyRecommendation ? 'positive' : 'neutral',
       },
     ],
     trackingDensity: {
       label: 'Properties Analyzed',
-      value: `${propertiesFound} properties`,
+      value: pluralize(totalPropertiesAnalyzed, 'property'),
       metric: 'properties',
     },
     focusCard: {
       header: setup.market,
-      tag: isBuyRecommendation ? 'BUY' : 'PASS',
-      tagType: isBuyRecommendation ? 'success' : 'warning',
+      tag: focusTag,
+      tagType: focusTagType,
       summary: firstParagraph,
       stats: [
         {
@@ -684,8 +997,8 @@ export function transformAgentResponseToDashboard(
           highlight: confidence > 0.7,
         },
         {
-          label: 'Properties Found',
-          value: propertiesFound.toString(),
+          label: 'Properties Analyzed',
+          value: totalPropertiesAnalyzed.toString(),
         },
         {
           label: 'Developers Identified',
@@ -694,9 +1007,10 @@ export function transformAgentResponseToDashboard(
       ],
     },
     markets,
-    reportContent: buildReportContent(agentResponse, setup, projectId, message, confidence, isBuyRecommendation),
-    opportunityQueue: buildOpportunityQueue(agentResponse, setup, projectId, confidence),
-    activityLog: buildActivityLog(agentResponse, setup, isBuyRecommendation, confidence),
+    propertyDetails: Object.keys(propertyDetails).length > 0 ? propertyDetails : undefined,
+    reportContent: buildReportContent(agentResponse, setup, projectId, message, confidence, recommendation, isBuyRecommendation, isRejection),
+    opportunityQueue: buildOpportunityQueue(agentResponse, setup, projectId, confidence, isRejection),
+    activityLog: buildActivityLog(agentResponse, setup, isBuyRecommendation, confidence, isRejection),
     isLive: false,
     lastDataCheck: now,
   };
@@ -710,7 +1024,8 @@ function buildOpportunityQueue(
   agentResponse: AgentResponse,
   setup: ProjectSetup,
   projectId: string,
-  confidence: number
+  confidence: number,
+  isRejection: boolean
 ): Array<{
   id: string;
   type: 'property_deal' | 'assemblage' | 'market_arbitrage' | 'entity_following' | 'zoning_play';
@@ -733,6 +1048,9 @@ function buildOpportunityQueue(
   updatedAt?: string;
 }> {
   const now = new Date().toISOString();
+  if (isRejection) {
+    return [];
+  }
   const opportunities: any[] = [];
   const structuredProps = agentResponse.structured_data?.properties || [];
   const developers = agentResponse.structured_data?.developers || [];
@@ -813,7 +1131,8 @@ function buildActivityLog(
   agentResponse: AgentResponse,
   setup: ProjectSetup,
   isBuyRecommendation: boolean,
-  confidence: number
+  confidence: number,
+  isRejection: boolean
 ): Array<{
   id: string;
   timestamp: string;
@@ -858,6 +1177,20 @@ function buildActivityLog(
       
       timeOffset -= duration * 1000;
     });
+
+    log.push({
+      id: `activity-final-${baseTime}`,
+      timestamp: new Date(baseTime).toISOString(),
+      toolName: 'supervisor',
+      description: isRejection
+        ? 'Supervisor flagged unresolved gaps in specialist analysis'
+        : 'Synthesizing specialist analyses into recommendation',
+      result: isRejection
+        ? 'Analysis rejected - awaiting corrected Market Specialist data'
+        : `${isBuyRecommendation ? 'BUY' : 'PASS'} recommendation with ${Math.round(confidence * 100)}% confidence`,
+      status: 'complete' as const,
+      duration: '~1min',
+    });
     
     return log;
   }
@@ -876,13 +1209,20 @@ function buildActivityLog(
   });
 
   // Add Property Specialist entry (if properties found)
-  if (agentResponse.structured_data?.properties && agentResponse.structured_data.properties.length > 0) {
+  const totalAnalyzedProperties = typeof agentResponse.structured_data?.properties_analyzed_total === 'number'
+    ? agentResponse.structured_data.properties_analyzed_total
+    : agentResponse.structured_data?.properties?.length ?? 0;
+
+  if (totalAnalyzedProperties > 0) {
+    const highlighted = agentResponse.structured_data?.properties?.length ?? 0;
     log.push({
       id: `activity-property-${baseTime}`,
       timestamp: new Date(baseTime - 540000).toISOString(), // 9 min ago
       toolName: 'property_specialist',
       description: `Searching for properties in ${setup.market}`,
-      result: `Found ${agentResponse.structured_data.properties.length} properties matching criteria`,
+      result: highlighted > 0
+        ? `Analyzed ${totalAnalyzedProperties} properties; highlighted ${highlighted}`
+        : `Analyzed ${totalAnalyzedProperties} properties`,
       status: 'complete' as const,
       duration: '~4min',
     });
@@ -928,8 +1268,12 @@ function buildActivityLog(
     id: `activity-final-${baseTime}`,
     timestamp: new Date(baseTime).toISOString(),
     toolName: 'supervisor',
-    description: 'Synthesizing specialist analyses into recommendation',
-    result: `${isBuyRecommendation ? 'BUY' : 'PASS'} recommendation with ${Math.round(confidence * 100)}% confidence`,
+    description: isRejection
+      ? 'Supervisor flagged unresolved gaps in specialist analysis'
+      : 'Synthesizing specialist analyses into recommendation',
+    result: isRejection
+      ? 'Analysis rejected - awaiting corrected Market Specialist data'
+      : `${isBuyRecommendation ? 'BUY' : 'PASS'} recommendation with ${Math.round(confidence * 100)}% confidence`,
     status: 'complete' as const,
     duration: '~1min',
   });

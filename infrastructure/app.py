@@ -17,7 +17,6 @@ from lib.dominion_aurora_stack import DominionAuroraStack
 from lib.dominion_lambda_stack import DominionLambdaStack
 from lib.dominion_agentcore_stack import DominionAgentCoreStack
 from lib.dominion_scraper_stack import DominionScraperStack
-# from lib.dominion_kb_stack import DominionKnowledgeBaseStack  # REMOVED: Using custom RAG instead
 
 # Get AWS account and region from environment or use defaults
 account = os.environ.get("CDK_DEFAULT_ACCOUNT", "872041712923")
@@ -58,11 +57,9 @@ agentcore_stack = DominionAgentCoreStack(
     description="Multi-agent system: Supervisor (Nova Premier) + 4 Specialists (Nova Lite)",
 )
 
-# Stack 4: Scraper Stack (Phase 5)
-# ECS Fargate tasks for automated data collection
-# Schedules: Daily (permits/sales), Weekly (entity enrichment), Quarterly (ordinances)
-# NOTE: Schedules are DISABLED by default (enable_schedules=False)
-# To enable scrapers, change to: enable_schedules=True
+# Stack 4: Scraper Stack (Phase 5) - ECS Fargate tasks for automated data collection
+# Schedules: Daily (permits/sales), Weekly (entity enrichment)
+# Schedules disabled by default - set enable_schedules=True to activate
 scraper_stack = DominionScraperStack(
     app,
     "Dominion-Scraper",

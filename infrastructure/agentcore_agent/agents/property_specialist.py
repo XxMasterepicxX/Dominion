@@ -6,6 +6,8 @@ Loads prompt from property_specialist_prompt.md
 import json
 import os
 import uuid
+from copy import deepcopy
+from datetime import datetime
 import boto3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from strands import Agent, tool
@@ -32,6 +34,133 @@ def load_prompt():
         raise
 
 SYSTEM_PROMPT = load_prompt()
+
+
+# Analysis tracking (captures total properties inspected per session)
+_analysis_tracker = {
+    'mode': None,
+    'total_count': 0,
+    'counts_by_type': {},
+    'searches': [],
+    'last_updated_at': None,
+}
+
+
+def _reset_analysis_tracker():
+    """Reset per-session analysis tracker state."""
+    _analysis_tracker['mode'] = None
+    _analysis_tracker['total_count'] = 0
+    _analysis_tracker['counts_by_type'] = {}
+    _analysis_tracker['searches'] = []
+    _analysis_tracker['last_updated_at'] = None
+
+
+def _record_search_result(tool_name: str, counts_by_type: dict, criteria: dict | None = None):
+    """Record aggregated property counts for the current analysis session."""
+    counts_by_type = {str(key or 'UNKNOWN'): int(value or 0) for key, value in counts_by_type.items()}
+    total = sum(counts_by_type.values())
+
+    if tool_name == 'search_all_property_types':
+        _analysis_tracker['mode'] = 'search_all_property_types'
+        _analysis_tracker['counts_by_type'] = counts_by_type.copy()
+        _analysis_tracker['total_count'] = total
+    else:
+        if _analysis_tracker['mode'] != 'search_all_property_types':
+            _analysis_tracker['mode'] = _analysis_tracker['mode'] or 'search_properties'
+            for key, value in counts_by_type.items():
+                existing = _analysis_tracker['counts_by_type'].get(key, 0)
+                _analysis_tracker['counts_by_type'][key] = max(existing, value)
+            _analysis_tracker['total_count'] = sum(_analysis_tracker['counts_by_type'].values())
+
+    _analysis_tracker['searches'].append({
+        'tool': tool_name,
+        'counts_by_type': counts_by_type,
+        'criteria': criteria or {},
+        'total': total,
+        'recorded_at': datetime.utcnow().isoformat(),
+    })
+    _analysis_tracker['last_updated_at'] = datetime.utcnow().isoformat()
+
+
+def get_latest_analysis_summary() -> dict:
+    """Return a snapshot of the most recent property analysis tracking data."""
+    return deepcopy(_analysis_tracker)
+
+
+def _normalize_owner_name(owner_name: str | None) -> str:
+    """Return an uppercase alphanumeric signature for the owner."""
+    if not owner_name or not isinstance(owner_name, str):
+        return ''
+    return ''.join(ch for ch in owner_name.upper() if ch.isalnum())
+
+
+def _apply_owner_cap(properties: list, per_owner_limit: int, max_results: int | None = None) -> tuple[list, dict]:
+    """Limit number of properties per owner and dedupe by parcel and coordinates."""
+    per_owner_limit = max(1, int(per_owner_limit or 1))
+    max_results = max_results or len(properties or [])
+
+    owner_counts: dict[str, int] = {}
+    parcel_seen: set[str] = set()
+    coord_seen: set[tuple[float, float]] = set()
+    trimmed: list = []
+    filtered_stats = {'removed': 0}
+
+    for prop in properties or []:
+        if not isinstance(prop, dict):
+            continue
+
+        parcel_raw = (prop.get('parcel_id') or '').strip()
+        parcel_key = parcel_raw.upper()
+        if parcel_key and parcel_key in parcel_seen:
+            filtered_stats['removed'] += 1
+            continue
+
+        lat = prop.get('latitude')
+        lon = prop.get('longitude')
+        try:
+            coord_key = (round(float(lat), 6), round(float(lon), 6))
+        except (TypeError, ValueError):
+            coord_key = None
+
+        if coord_key and coord_key in coord_seen:
+            filtered_stats['removed'] += 1
+            continue
+
+        owner_key = _normalize_owner_name(prop.get('owner_name'))
+        if owner_key:
+            owner_limit = owner_counts.get(owner_key, 0)
+            if owner_limit >= per_owner_limit:
+                filtered_stats['removed'] += 1
+                continue
+            owner_counts[owner_key] = owner_limit + 1
+
+        if parcel_key:
+            parcel_seen.add(parcel_key)
+        if coord_key:
+            coord_seen.add(coord_key)
+
+        trimmed.append(prop)
+        if len(trimmed) >= max_results:
+            break
+
+    return trimmed, filtered_stats
+
+
+def _determine_default_order(property_type: str | None, requested_order: str | None = None) -> str | None:
+    """Pick a diversified ordering strategy when caller does not specify one."""
+    if requested_order:
+        return requested_order
+
+    type_key = (property_type or 'OTHER').strip().upper()
+    order_map = {
+        'CONDO': 'last_sale_recent',
+        'TOWNHOME': 'last_sale_recent',
+        'SINGLE FAMILY': 'market_value_recent',
+        'MOBILE HOME': 'year_built_recent',
+        'VACANT': 'acreage_then_value',
+        'OTHER': 'market_value_recent'
+    }
+    return order_map.get(type_key, 'market_value_recent')
 
 
 # Tool definitions for Property Specialist
@@ -85,12 +214,21 @@ def search_properties(
     Supports: location, price, size, physical features, building quality,
     owner intelligence, tax/exemptions, sales history filters.
     """
+    parameters = {
+        k: v for k, v in locals().items()
+        if v is not None and k not in ['payload', 'response', 'result', 'parameters', 'data', 'trimmed', 'stats']
+    }
+
+    if 'per_owner_limit' not in parameters:
+        parameters['per_owner_limit'] = 2
+
+    order_choice = _determine_default_order(parameters.get('property_type'), parameters.get('order_by'))
+    if order_choice:
+        parameters['order_by'] = order_choice
+
     payload = {
         'tool': 'search_properties',
-        'parameters': {
-            k: v for k, v in locals().items()
-            if v is not None and k not in ['payload', 'response', 'result']
-        }
+        'parameters': parameters
     }
 
     response = lambda_client.invoke(
@@ -100,7 +238,39 @@ def search_properties(
     )
 
     result = json.loads(response['Payload'].read())
-    return json.loads(result['body'])
+    data = json.loads(result['body'])
+
+    properties = data.get('properties', [])
+    limit_value = parameters.get('limit') or 100
+    try:
+        per_owner_limit = int(parameters.get('per_owner_limit', 2))
+    except (TypeError, ValueError):
+        per_owner_limit = 2
+
+    trimmed, stats = _apply_owner_cap(properties, per_owner_limit, max_results=int(limit_value))
+
+    if stats.get('removed'):
+        logger.info(
+            "Applied per-owner cap to property search results",
+            removed=stats['removed'],
+            per_owner_limit=per_owner_limit,
+            returned=len(trimmed),
+        )
+
+    data['properties'] = trimmed
+    data['count'] = len(trimmed)
+
+    try:
+        property_type_label = parameters.get('property_type') or 'ALL'
+        _record_search_result(
+            'search_properties',
+            {property_type_label: data.get('count', 0)},
+            {k: v for k, v in parameters.items() if v is not None},
+        )
+    except Exception as tracking_error:  # pragma: no cover - tracking must not block core flow
+        logger.warning("Failed to record search_properties tracking data", error=str(tracking_error))
+
+    return data
 
 
 @tool
@@ -132,22 +302,29 @@ def search_all_property_types(
     def search_single_type(prop_type):
         """Helper to search one property type"""
         try:
+            parameters = {
+                'city': city,
+                'min_price': min_price,
+                'max_price': max_price,
+                'property_type': prop_type,
+                'min_sqft': min_sqft,
+                'max_sqft': max_sqft,
+                'min_lot_acres': min_lot_acres,
+                'max_lot_acres': max_lot_acres,
+                'limit': limit
+            }
+            parameters = {k: v for k, v in parameters.items() if v is not None}
+
+            order_choice = _determine_default_order(prop_type, parameters.get('order_by'))
+            if order_choice:
+                parameters['order_by'] = order_choice
+
+            parameters.setdefault('per_owner_limit', 2)
+
             payload = {
                 'tool': 'search_properties',
-                'parameters': {
-                    'city': city,
-                    'min_price': min_price,
-                    'max_price': max_price,
-                    'property_type': prop_type,
-                    'min_sqft': min_sqft,
-                    'max_sqft': max_sqft,
-                    'min_lot_acres': min_lot_acres,
-                    'max_lot_acres': max_lot_acres,
-                    'limit': limit
-                }
+                'parameters': parameters
             }
-            # Remove None values
-            payload['parameters'] = {k: v for k, v in payload['parameters'].items() if v is not None}
 
             response = lambda_client.invoke(
                 FunctionName=INTELLIGENCE_FUNCTION_ARN,
@@ -157,6 +334,22 @@ def search_all_property_types(
 
             result = json.loads(response['Payload'].read())
             data = json.loads(result['body'])
+
+            properties = data.get('properties', [])
+            per_owner_limit = parameters.get('per_owner_limit', 2)
+            trimmed, stats = _apply_owner_cap(properties, per_owner_limit, max_results=limit)
+
+            if stats.get('removed'):
+                logger.info(
+                    "Applied per-owner cap in search_all_property_types",
+                    property_type=prop_type or 'OTHER',
+                    removed=stats['removed'],
+                    per_owner_limit=per_owner_limit,
+                    returned=len(trimmed),
+                )
+
+            data['properties'] = trimmed
+            data['count'] = len(trimmed)
 
             return {
                 'property_type': prop_type or 'OTHER',
@@ -185,6 +378,15 @@ def search_all_property_types(
     total_properties = sum(r['count'] for r in results_by_type)
 
     logger.info("search_all_property_types completed", total=total_properties)
+
+    try:
+        _record_search_result(
+            'search_all_property_types',
+            {entry['property_type']: entry['count'] for entry in results_by_type},
+            {'city': city, 'min_price': min_price, 'max_price': max_price, 'min_sqft': min_sqft, 'max_sqft': max_sqft},
+        )
+    except Exception as tracking_error:  # pragma: no cover - tracking must not block core flow
+        logger.warning("Failed to record search_all_property_types tracking data", error=str(tracking_error))
 
     return {
         'success': True,
@@ -363,6 +565,9 @@ def invoke(task: str, session_id: str = None) -> str:
         session_id = str(uuid.uuid4())
 
     logger.info("Property Specialist invoked", task=task[:100], session_id=session_id)
+
+    # Reset tracking so counts do not bleed between sessions
+    _reset_analysis_tracker()
 
     # Create fresh agent instance for this session
     property_agent = Agent(

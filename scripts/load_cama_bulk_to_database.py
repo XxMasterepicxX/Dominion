@@ -278,11 +278,15 @@ async def load_cama_data(
 
         # Create snapshot record
         if not dry_run:
+            import hashlib
+            with open(csv_path, 'rb') as f:
+                file_hash = hashlib.md5(f.read()).hexdigest()
+            
             snapshot = BulkDataSnapshot(
                 market_id=market_id,
                 data_source='cama_comprehensive',
                 file_name=csv_path.name,
-                file_hash='',  # TODO: calculate hash
+                file_hash=file_hash,
                 status='processing',
                 records_total=total_rows,
                 download_started_at=datetime.utcnow(),

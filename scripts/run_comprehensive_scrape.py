@@ -563,7 +563,7 @@ async def main():
     print("  2. Import to Aurora: psql -h aurora-endpoint < dominion_fresh.sql")
     print("  3. Test agent on AWS")
 
-    await db_manager.shutdown()
+    await db_manager.close()
 
 
 if __name__ == "__main__":

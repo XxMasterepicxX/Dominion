@@ -18,7 +18,7 @@ Self-contained - no external module dependencies.
 
 import json
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 import boto3
 from botocore.exceptions import ClientError
 
@@ -93,6 +93,70 @@ def format_rds_response(response: Dict) -> List[Dict]:
     return results
 
 
+def _normalize_owner_name(owner_name: Any) -> str:
+    """Return an uppercase alphanumeric signature for the owner name."""
+    if not owner_name or not isinstance(owner_name, str):
+        return ''
+    return ''.join(ch for ch in owner_name.upper() if ch.isalnum())
+
+
+def _apply_owner_limit(properties: List[Dict], per_owner_limit: int, limit: int) -> Tuple[List[Dict], Dict[str, Any]]:
+    """Restrict the number of properties per owner and dedupe parcels/coordinates."""
+    per_owner_limit = max(1, int(per_owner_limit or 1))
+    limit = max(1, int(limit or 1))
+
+    owner_counts: Dict[str, int] = {}
+    parcel_seen: set[str] = set()
+    coord_seen: set[tuple[float, float]] = set()
+    filtered: List[Dict] = []
+    removed = 0
+
+    for prop in properties or []:
+        if not isinstance(prop, dict):
+            continue
+
+        parcel_raw = (prop.get('parcel_id') or '').strip()
+        parcel_key = parcel_raw.upper()
+        if parcel_key and parcel_key in parcel_seen:
+            removed += 1
+            continue
+
+        lat = prop.get('latitude')
+        lon = prop.get('longitude')
+        try:
+            coord_key = (round(float(lat), 6), round(float(lon), 6))
+        except (TypeError, ValueError):
+            coord_key = None
+
+        if coord_key and coord_key in coord_seen:
+            removed += 1
+            continue
+
+        owner_key = _normalize_owner_name(prop.get('owner_name'))
+        if owner_key:
+            count = owner_counts.get(owner_key, 0)
+            if count >= per_owner_limit:
+                removed += 1
+                continue
+            owner_counts[owner_key] = count + 1
+
+        if parcel_key:
+            parcel_seen.add(parcel_key)
+        if coord_key:
+            coord_seen.add(coord_key)
+
+        filtered.append(prop)
+        if len(filtered) >= limit:
+            break
+
+    metrics = {
+        'removed': removed,
+        'unique_owners': len(owner_counts),
+    }
+
+    return filtered, metrics
+
+
 # =============================================================================
 # TOOL IMPLEMENTATIONS
 # =============================================================================
@@ -161,7 +225,8 @@ def search_properties(params: Dict) -> Dict:
 
     -- Other
     - limit: int (default: 20)
-    - order_by: str (default: "market_value", options: "market_value", "last_sale_date", "year_built", "lot_size_acres")
+    - per_owner_limit: int (default: 2) - maximum properties returned per owner entity
+    - order_by: str (default: "market_value_recent", options: "market_value", "market_value_recent", "last_sale_date", "last_sale_recent", "year_built", "year_built_recent", "lot_size_acres", "acreage_then_value", "random")
     """
     # Extract all parameters
     city = params.get('city')
@@ -213,8 +278,18 @@ def search_properties(params: Dict) -> Dict:
     max_last_sale_date = params.get('max_last_sale_date')
     sale_qualified = params.get('sale_qualified')
 
-    limit = params.get('limit', 20)
-    order_by = params.get('order_by', 'market_value')
+    try:
+        limit = int(params.get('limit', 20) or 20)
+    except (TypeError, ValueError):
+        limit = 20
+
+    try:
+        per_owner_limit = int(params.get('per_owner_limit', 2) or 2)
+    except (TypeError, ValueError):
+        per_owner_limit = 2
+
+    order_by_raw = params.get('order_by') or 'market_value_recent'
+    order_by = str(order_by_raw).strip().lower()
 
     # Build dynamic WHERE clause
     where_clauses = []
@@ -428,22 +503,43 @@ def search_properties(params: Dict) -> Dict:
     # Order by
     valid_orders = {
         'market_value': 'market_value DESC NULLS LAST',
+        'market_value_recent': 'market_value DESC NULLS LAST, last_sale_date DESC NULLS LAST',
         'last_sale_date': 'last_sale_date DESC NULLS LAST',
+        'last_sale_recent': 'last_sale_date DESC NULLS LAST, market_value DESC NULLS LAST',
         'year_built': 'year_built DESC NULLS LAST',
-        'lot_size_acres': 'lot_size_acres DESC NULLS LAST'
+        'year_built_recent': 'year_built DESC NULLS LAST, last_sale_date DESC NULLS LAST',
+        'lot_size_acres': 'lot_size_acres DESC NULLS LAST',
+        'acreage_then_value': 'lot_size_acres DESC NULLS LAST, market_value DESC NULLS LAST',
+        'random': 'RANDOM()'
     }
-    order_clause = valid_orders.get(order_by, 'market_value DESC NULLS LAST')
-    sql += f" ORDER BY {order_clause} LIMIT {limit}"
+
+    order_clause = valid_orders.get(order_by, valid_orders['market_value_recent'])
+    fetch_limit = min(max(limit, 1) * 3, 500)
+    sql += f" ORDER BY {order_clause} LIMIT {fetch_limit}"
 
     response = execute_sql(sql, sql_params if sql_params else None)
     properties = format_rds_response(response)
+    filtered_properties, owner_metrics = _apply_owner_limit(properties, per_owner_limit, limit)
+
+    if owner_metrics.get('removed'):
+        print(
+            "[search_properties] Applied per-owner cap",
+            {
+                'removed': owner_metrics['removed'],
+                'per_owner_limit': per_owner_limit,
+                'returned': len(filtered_properties),
+                'total_before_cap': len(properties)
+            }
+        )
 
     return {
         'success': True,
-        'count': len(properties),
-        'properties': properties,
+        'count': len(filtered_properties),
+        'properties': filtered_properties,
         'filters_applied': len(where_clauses),
-        'note': 'Enhanced search with 40+ filter options including building features, neighborhood, owner location, and tax data'
+        'owner_cap_removed': owner_metrics.get('removed', 0),
+        'total_before_owner_cap': len(properties),
+        'note': 'Enhanced search with 40+ filters plus per-owner diversification and recency-aware ordering'
     }
 
 
@@ -915,21 +1011,17 @@ def analyze_market_trends(params: Dict) -> Dict:
             abs_rate = float(trend.get('absorption_rate_full_period', 0) or 0)
             months_inv = trend.get('months_of_inventory')  # Already converted above
 
-            # Buyer's market opportunities
             if market_type == "Buyer's Market" and months_inv and months_inv > 10:
-                recommendations.append(f"🎯 {pt}: Strong buyer leverage (>10 months inventory). Negotiate aggressively, focus on distressed/motivated sellers")
+                recommendations.append(f"[BUYER OPPORTUNITY] {pt}: Strong buyer leverage (>10 months inventory). Negotiate aggressively, focus on distressed/motivated sellers")
 
-            # Seller's market - act fast
             if market_type == "Seller's Market" and trend_dir == "Accelerating":
-                recommendations.append(f"⚡ {pt}: Hot market accelerating ({abs_rate:.1f}% absorption). Act quickly on opportunities, expect competition")
+                recommendations.append(f"[HOT MARKET] {pt}: Accelerating ({abs_rate:.1f}% absorption). Act quickly on opportunities, expect competition")
 
-            # Trend reversals
             if trend_dir == "Decelerating" and abs_rate < 12:
-                recommendations.append(f"📉 {pt}: Sales decelerating in buyer's market. Wait for further price corrections or focus on value-add plays")
+                recommendations.append(f"[SLOWING] {pt}: Sales decelerating in buyer's market. Wait for further price corrections or focus on value-add plays")
 
-            # Stable neutral markets
             if market_type == "Neutral Market" and trend_dir == "Stable":
-                recommendations.append(f"⚖️ {pt}: Balanced market. Focus on deal quality, fundamentals, and long-term hold strategy")
+                recommendations.append(f"[BALANCED] {pt}: Balanced market. Focus on deal quality, fundamentals, and long-term hold strategy")
 
         # Cross-property opportunities
         if len(trends) >= 2:

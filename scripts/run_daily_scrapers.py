@@ -332,7 +332,7 @@ async def main():
         print("\n[RECOMMENDATION] Run entity resolution to link new contractors:")
         print("  python scripts/run_entity_resolution.py")
 
-    await db_manager.shutdown()
+    await db_manager.close()
 
 
 if __name__ == "__main__":

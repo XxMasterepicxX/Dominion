@@ -22,7 +22,7 @@ All prompts loaded from markdown files (no hardcoding).
 import os
 import uuid
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import structlog
 
 # Import supervisor (which imports all specialists)
@@ -164,24 +164,50 @@ def lambda_handler(event, context):
 
         logger.info("Lambda handler invoked", event_keys=list(event.keys()))
 
+        # Handle CORS for Lambda Function URL
+        # Even though CORS is configured in CDK, we need to set headers in response
+        cors_headers = {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+        }
+
+        # Handle preflight OPTIONS requests
+        method = None
+        if isinstance(event, dict):
+            method = event.get('httpMethod')
+            if not method:
+                request_context = event.get('requestContext') or {}
+                http_info = request_context.get('http') if isinstance(request_context, dict) else {}
+                method = http_info.get('method')
+        if method and method.upper() == 'OPTIONS':
+            return {
+                'statusCode': 200,
+                'headers': cors_headers,
+                'body': json.dumps({'success': True, 'message': 'CORS preflight OK'})
+            }
+
         # Call the entrypoint (which is async)
         import asyncio
         result = asyncio.run(invoke(payload, context))
 
-        # Return Lambda Function URL response format
-        # CORS headers are handled by Function URL configuration in CDK
+        # Return Lambda Function URL response format with CORS headers
         return {
             'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json'
-            },
+            'headers': cors_headers,
             'body': json.dumps(result)
         }
     except Exception as e:
         logger.error("Lambda handler error", error=str(e), exc_info=True)
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type',
+            },
             'body': json.dumps({'success': False, 'error': str(e)})
         }
 
@@ -193,3 +219,5 @@ if __name__ == "__main__":
     # Start HTTP server on port 8080 when run directly (for local development)
     logger.info("Starting Dominion Multi-Agent System on port 8080")
     app.run()
+# Force rebuild
+# Force rebuild

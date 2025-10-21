@@ -41,6 +41,13 @@ _current_session_id = None
 # Capture specialist responses for structured data extraction
 _specialist_responses = {}
 
+
+def _strip_non_ascii(text: str) -> str:
+    """Remove non-ASCII characters (emoji, styling glyphs) from supervisor output."""
+    if not isinstance(text, str):
+        return text
+    return ''.join(ch for ch in text if ord(ch) < 128)
+
 @tool
 def delegate_to_property_specialist(task: str) -> str:
     """
@@ -67,6 +74,12 @@ def delegate_to_property_specialist(task: str) -> str:
         result = property_specialist.invoke(task, session_id=_current_session_id)
         # Store for structured data extraction
         _specialist_responses['property'] = result
+        try:
+            summary = property_specialist.get_latest_analysis_summary()
+            if summary:
+                _specialist_responses['property_metadata'] = summary
+        except Exception as tracking_error:  # pragma: no cover - metadata retrieval optional
+            logger.warning("Failed to capture property analysis summary", error=str(tracking_error))
         logger.info("Property Specialist completed task", session_id=_current_session_id)
         return result
     except Exception as e:
@@ -278,7 +291,6 @@ def invoke(user_query: str, session_id: str = None):
 
         # Strip internal agent thinking blocks from message before sending to frontend
         # Agents may include <thinking>...</thinking> blocks that should not be visible to users
-        import re
         if isinstance(message, str):
             # Remove thinking blocks (including multiline)
             message = re.sub(r'<thinking>.*?</thinking>', '', message, flags=re.DOTALL)
@@ -286,10 +298,20 @@ def invoke(user_query: str, session_id: str = None):
             message = re.sub(r'</?thinking>', '', message)
             # Clean up extra whitespace
             message = re.sub(r'\n\n\n+', '\n\n', message).strip()
+            # Remove emoji and other non-ASCII glyphs to enforce neutral presentation
+            sanitized_message = _strip_non_ascii(message)
+            if sanitized_message != message:
+                logger.info("Removed non-ASCII characters from Supervisor message",
+                            original_length=len(message), sanitized_length=len(sanitized_message))
+            message = sanitized_message
             logger.info("Cleaned thinking blocks from message", cleaned_length=len(message))
 
         # Extract structured data from specialist responses AND final message
         structured_data = extract_structured_data(_specialist_responses, final_message=message)
+        structured_data = validate_structured_data(structured_data, final_message=message)
+
+        # Ensure final message always carries a JSON payload for the frontend parser
+        message = ensure_structured_json_block(message, structured_data)
 
         return {
             'message': message,
@@ -320,140 +342,221 @@ def extract_structured_data(specialist_responses: dict, final_message: str = Non
     - Activity tab: Specialist breakdown with confidence and durations
     - Globe/Map: Property markers at exact coordinates
     """
-    import re
-    import json
-    
-    # === STRATEGY 1: Extract JSON block from final message (PREFERRED) ===
-    if final_message:
-        # Look for ```json ... ``` block - use greedy match to capture entire JSON object
-        # Pattern: ```json followed by { ... } followed by ```
-        # Use [\s\S]* (greedy) to capture everything between last { and first ``` after it
-        json_match = re.search(r'```json\s*(\{[\s\S]*\})\s*```', final_message, re.MULTILINE | re.DOTALL)
-        if json_match:
-            try:
-                json_str = json_match.group(1).strip()
-                data = json.loads(json_str)
-                logger.info("✅ Extracted structured data from JSON block", 
-                           properties=len(data.get('properties', [])),
-                           developers=len(data.get('developers', [])),
-                           specialists=len(data.get('specialist_breakdown', [])),
-                           risks=len(data.get('risks', [])),
-                           actions=len(data.get('actions', [])),
-                           has_assemblage=bool(data.get('assemblage')))
-                
-                # Validate required fields
-                if 'recommendation' not in data:
-                    logger.warning("JSON block missing 'recommendation' field")
-                if 'confidence' not in data:
-                    logger.warning("JSON block missing 'confidence' field")
-                if 'properties' not in data:
-                    logger.warning("JSON block missing 'properties' field")
-                    
-                return data
-            except json.JSONDecodeError as e:
-                logger.warning("⚠️ JSON block found but invalid, falling back to regex", 
-                              error=str(e), 
-                              json_snippet=json_match.group(1)[:300])
-        else:
-            logger.warning("⚠️ No JSON block found in final message, using regex fallback")
-    
-    # === STRATEGY 2: Regex parsing from specialist responses (FALLBACK) ===
-    logger.info("Using regex fallback to extract structured data from specialist responses")
-    
-    structured = {
-        'properties': [],
-        'developers': [],
-        'recommendation': 'UNKNOWN',
-        'confidence': 0.5,
-        'specialist_breakdown': [],
-        'risks': [],
-        'actions': [],
-        'expected_return': None,
-        'assemblage': None
-    }
+    if not final_message:
+        logger.error("Supervisor final message missing; cannot extract structured data")
+        raise ValueError("Supervisor final message missing; structured JSON block required")
 
+    json_match = re.search(r'```json\s*(\{[\s\S]*\})\s*```', final_message, re.MULTILINE | re.DOTALL)
+    if not json_match:
+        logger.error("Supervisor response missing structured JSON block")
+        raise ValueError("Supervisor response must include structured JSON block")
+
+    json_str = json_match.group(1).strip()
     try:
-        # Extract properties from Property Specialist response
-        # Format from logs: "parcel_id=06432-074-000, address=Granada Blvd, lat=29.6856, lon=-82.3426"
-        # Note: Prompt instructs "COORDINATES:" prefix but agent sometimes omits it
-        if 'property' in specialist_responses:
-            prop_text = specialist_responses['property']
-            
-            # Try WITH "COORDINATES:" prefix first (as instructed in prompt)
-            property_pattern_with_prefix = r'COORDINATES:\s*parcel_id=([^,\s]+)[\s,]+address=([^,]+)[\s,]+lat=([\d\.\-]+)[\s,]+lon=([\d\.\-]+)'
-            matches = re.findall(property_pattern_with_prefix, prop_text, re.IGNORECASE)
-            
-            # Fallback: Try WITHOUT prefix (actual format from some logs)
-            if len(matches) == 0:
-                property_pattern_no_prefix = r'parcel_id=([^,\s]+)[\s,]+address=([^,]+)[\s,]+lat=([\d\.\-]+)[\s,]+lon=([\d\.\-]+)'
-                matches = re.findall(property_pattern_no_prefix, prop_text, re.IGNORECASE)
-            
-            logger.info(f"Extracted {len(matches)} properties with coordinates from Property Specialist")
-            
-            for match in matches[:20]:  # Increased limit to 20 properties
-                try:
-                    structured['properties'].append({
-                        'parcel_id': match[0].strip(),
-                        'address': match[1].strip(),
-                        'latitude': float(match[2]),
-                        'longitude': float(match[3])
-                    })
-                except (ValueError, IndexError) as e:
-                    logger.warning(f"Could not parse property: {match}, error: {e}")
-                    continue
+        structured = json.loads(json_str)
+    except json.JSONDecodeError as exc:
+        logger.error("Structured JSON block invalid", error=str(exc), snippet=json_str[:200])
+        raise ValueError("Supervisor structured JSON block invalid") from exc
 
-        # Extract developers from Developer Intelligence response
-        # Formats: "1. **UCG REALTY LLC**" or "UCG Realty (86 properties)" or "Top Developers: UCG Realty"
-        if 'developer' in specialist_responses:
-            dev_text = specialist_responses['developer']
-            
-            # Pattern 1: Numbered list with bold (markdown): "1. **UCG REALTY LLC**"
-            dev_pattern1 = r'\d+\.\s+\*\*([A-Z][A-Z\s\&\.\,\-]+(?:LLC|INC|CORP|HOMES|REALTY|GROUP|PROPERTIES)?)\*\*'
-            matches1 = re.findall(dev_pattern1, dev_text, re.IGNORECASE)
-            
-            # Pattern 2: Name with property count: "UCG Realty (86 properties)"
-            dev_pattern2 = r'([A-Z][A-Z\s\&\.\,\-]+(?:LLC|INC|CORP|HOMES|REALTY|GROUP|PROPERTIES)?)\s*\(\d+\s+properties?\)'
-            matches2 = re.findall(dev_pattern2, dev_text, re.IGNORECASE)
-            
-            # Pattern 3: After "Top Developers:" or "Developer:" labels
-            dev_pattern3 = r'(?:Top\s+Developers?|Developer)[:\s]+([A-Z][A-Z\s\&\.\,\-]+(?:LLC|INC|CORP|HOMES|REALTY|GROUP|PROPERTIES)?)'
-            matches3 = re.findall(dev_pattern3, dev_text, re.IGNORECASE)
-            
-            # Combine and deduplicate
-            all_matches = matches1 + matches2 + matches3
-            seen = set()
-            
-            for match in all_matches[:10]:  # Limit to top 10
-                clean_name = match.strip().upper()
-                if clean_name and clean_name not in seen and len(clean_name) > 3:
-                    seen.add(clean_name)
-                    structured['developers'].append({
-                        'name': match.strip()  # Keep original capitalization
-                    })
-            
-            logger.info(f"Extracted {len(structured['developers'])} developers from Developer Intelligence")
+    logger.info(
+        "Extracted structured data from JSON block",
+        properties=len(structured.get('properties', []) or []),
+        developers=len(structured.get('developers', []) or []),
+        specialists=len(structured.get('specialist_breakdown', []) or []),
+        risks=len(structured.get('risks', []) or []),
+        actions=len(structured.get('actions', []) or []),
+        has_assemblage=bool(structured.get('assemblage')),
+    )
 
-        # Extract recommendation from Supervisor's final response
-        # Look for patterns like "CONDITIONAL BUY", "BUY", "PASS", etc.
-        supervisor_text = specialist_responses.get('supervisor', '')
-        if 'BUY' in supervisor_text.upper() and 'NOT' not in supervisor_text.upper():
-            if 'CONDITIONAL' in supervisor_text.upper():
-                structured['recommendation'] = 'CONDITIONAL BUY'
-            else:
-                structured['recommendation'] = 'BUY'
-        elif 'PASS' in supervisor_text.upper():
-            structured['recommendation'] = 'PASS'
-        
-        # Extract confidence score
-        # Patterns: "Confidence: 60%", "60% confidence", "Overall Confidence: 60%"
-        confidence_pattern = r'(?:confidence|conf)[:\s]+(\d+)%|(\d+)%\s+confidence'
-        confidence_match = re.search(confidence_pattern, supervisor_text, re.IGNORECASE)
-        if confidence_match:
-            confidence_val = confidence_match.group(1) or confidence_match.group(2)
-            structured['confidence'] = float(confidence_val) / 100
-            logger.info(f"Extracted confidence: {structured['confidence']}")
+    # Validate required fields and surface clear diagnostics for the Supervisor prompt author.
+    missing_fields = [
+        field for field in ('recommendation', 'confidence', 'properties', 'developers', 'actions')
+        if field not in structured
+    ]
+    if missing_fields:
+        logger.warning("Structured JSON block missing required fields", missing=missing_fields)
 
-    except Exception as e:
-        logger.error("Could not extract structured data", error=str(e), exc_info=True)
+    # Enrich structured data with metadata captured from tool execution (property counts, etc.).
+    property_metadata = specialist_responses.get('property_metadata')
+    if isinstance(property_metadata, dict):
+        total = property_metadata.get('total_count') or property_metadata.get('total_properties')
+        if isinstance(total, (int, float)) and total > 0 and 'properties_analyzed_total' not in structured:
+            structured['properties_analyzed_total'] = int(total)
+        counts_by_type = property_metadata.get('counts_by_type')
+        if isinstance(counts_by_type, dict) and 'properties_analyzed_by_type' not in structured:
+            structured['properties_analyzed_by_type'] = {
+                str(key): int(value) for key, value in counts_by_type.items() if isinstance(value, (int, float))
+            }
+        searches = property_metadata.get('searches')
+        if isinstance(searches, list) and 'property_searches' not in structured:
+            structured['property_searches'] = searches
 
     return structured
+
+
+def validate_structured_data(structured: dict, final_message: str) -> dict:
+    """
+    Ensure structured data contains the minimum fields the frontend expects.
+    Fills sensible defaults and normalises confidence values.
+    """
+    structured = structured or {}
+
+    # Recommendation
+    recommendation = structured.get('recommendation') or 'UNKNOWN'
+    structured['recommendation'] = recommendation
+
+    # Confidence normalisation
+    confidence = structured.get('confidence')
+    if isinstance(confidence, (int, float)):
+        confidence = float(confidence)
+        if confidence > 1:
+            confidence /= 100.0
+        confidence = max(0.0, min(1.0, confidence))
+    else:
+        match = re.search(r'(?:confidence|conf)[\s:]+(\d+)%', final_message or '', re.IGNORECASE)
+        confidence = float(match.group(1)) / 100.0 if match else 0.5
+    structured['confidence'] = confidence
+
+    # Collections required by dashboard
+    collections = ['properties', 'developers', 'specialist_breakdown', 'risks', 'actions']
+    for key in collections:
+        value = structured.get(key)
+        if not isinstance(value, list):
+            structured[key] = []
+
+    # Remove duplicate properties (parcel_id or coordinate collisions) to avoid dashboard bias
+    properties = structured.get('properties', [])
+    if isinstance(properties, list) and properties:
+        seen_parcels = set()
+        seen_coords = set()
+        seen_addresses = set()
+        unique_properties = []
+        duplicates = 0
+
+        for prop in properties:
+            if not isinstance(prop, dict):
+                continue
+
+            parcel_raw = prop.get('parcel_id') or ''
+            parcel_id = parcel_raw.strip().upper() if isinstance(parcel_raw, str) else None
+
+            lat = prop.get('latitude')
+            lon = prop.get('longitude')
+            try:
+                coords = (round(float(lat), 6), round(float(lon), 6))
+            except (TypeError, ValueError):
+                coords = None
+
+            address_raw = prop.get('address') or ''
+            address_key = address_raw.strip().upper() if isinstance(address_raw, str) else None
+
+            duplicate = False
+            if parcel_id:
+                if parcel_id in seen_parcels:
+                    duplicate = True
+                else:
+                    seen_parcels.add(parcel_id)
+
+            if coords:
+                if coords in seen_coords:
+                    duplicate = True
+                else:
+                    seen_coords.add(coords)
+
+            if not parcel_id and not coords and address_key:
+                if address_key in seen_addresses:
+                    duplicate = True
+                else:
+                    seen_addresses.add(address_key)
+
+            if duplicate:
+                duplicates += 1
+                continue
+
+            unique_properties.append(prop)
+
+        if duplicates:
+            logger.info(
+                "Removed duplicate properties from structured payload",
+                before=len(properties),
+                after=len(unique_properties),
+                duplicates=duplicates,
+            )
+
+        # Cap to reasonable number to avoid overwhelming downstream consumers
+        structured['properties'] = unique_properties[:15]
+
+    # Properties analyzed totals/by type
+    total_analyzed = structured.get('properties_analyzed_total')
+    if isinstance(total_analyzed, (int, float)):
+        structured['properties_analyzed_total'] = int(total_analyzed)
+    else:
+        structured['properties_analyzed_total'] = len(structured.get('properties', []))
+
+    counts_by_type = structured.get('properties_analyzed_by_type')
+    if isinstance(counts_by_type, dict):
+        normalised = {}
+        for key, value in counts_by_type.items():
+            if isinstance(value, (int, float)):
+                normalised[str(key)] = int(value)
+        structured['properties_analyzed_by_type'] = normalised
+    else:
+        structured['properties_analyzed_by_type'] = {}
+
+    searches = structured.get('property_searches')
+    if isinstance(searches, list):
+        normalised_searches = []
+        for entry in searches:
+            if isinstance(entry, dict):
+                normalised_entry = dict(entry)
+                if 'counts_by_type' in normalised_entry and isinstance(normalised_entry['counts_by_type'], dict):
+                    normalised_entry['counts_by_type'] = {
+                        str(k): int(v) for k, v in normalised_entry['counts_by_type'].items() if isinstance(v, (int, float))
+                    }
+                if 'total' in normalised_entry and isinstance(normalised_entry['total'], (int, float)):
+                    normalised_entry['total'] = int(normalised_entry['total'])
+                normalised_searches.append(normalised_entry)
+        structured['property_searches'] = normalised_searches
+    else:
+        structured['property_searches'] = []
+
+    # Assemblage optional: ensure dict type when present
+    assemblage = structured.get('assemblage')
+    if assemblage is not None and not isinstance(assemblage, dict):
+        structured['assemblage'] = None
+
+    # Normalise property coordinates if available
+    normalised_properties = []
+    for prop in structured.get('properties', []):
+        if not isinstance(prop, dict):
+            continue
+        try:
+            lat = float(prop.get('latitude'))
+            lon = float(prop.get('longitude'))
+            prop['latitude'] = lat
+            prop['longitude'] = lon
+        except (TypeError, ValueError):
+            # Skip properties without numeric coordinates
+            continue
+        parcel_id = prop.get('parcel_id')
+        address = prop.get('address')
+        if parcel_id and address:
+            normalised_properties.append(prop)
+    if normalised_properties:
+        structured['properties'] = normalised_properties
+
+    return structured
+
+
+def ensure_structured_json_block(message: str, structured: dict) -> str:
+    """
+    Append (or replace) the structured JSON block required by the frontend.
+    """
+    if not isinstance(message, str):
+        message = str(message)
+
+    json_block = json.dumps(structured, ensure_ascii=False, indent=2, sort_keys=True)
+
+    message = re.sub(r'```json[\s\S]*?```', '', message).rstrip()
+
+    return f"{message}\n\n```json\n{json_block}\n```"

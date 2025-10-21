@@ -983,10 +983,7 @@ class DataIngestionService:
         if not source_context:
             source_context = {'source_type': 'unknown'}
 
-        # EntityResolver temporarily disabled (needs refactoring for new schema)
-        # TODO: Refactor EntityResolver to remove fact_based_attributes references
-        # For now, use basic entity creation
-        logger.debug(f"Creating entity (EntityResolver disabled): {name}")
+        logger.debug(f"Creating entity: {name}")
         entity = Entity(
             id=uuid4(),
             entity_type=entity_type,

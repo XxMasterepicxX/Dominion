@@ -36,6 +36,25 @@ export interface LatestUpdate {
   impact?: 'positive' | 'negative' | 'neutral';
 }
 
+export interface PropertyDetail {
+  parcelId: string;
+  address: string;
+  propertyType?: string;
+  zoning?: string;
+  lotSizeSqft?: number;
+  acreage?: number;
+  marketValue?: number;
+  assessedValue?: number;
+  owner?: string;
+  ownerType?: string;
+  lastSaleDate?: string;
+  lastSalePrice?: number;
+  confidence?: number;
+  aiSummary?: string;
+  highlights?: string[];
+  metadata?: Record<string, unknown>;
+}
+
 export interface MarketMarker {
   location: [number, number];
   size: number;
@@ -47,6 +66,9 @@ export interface MarketMarker {
   recentActivity?: string;
   confidence?: number;
   confidenceLabel?: string;
+  parcelId?: string;
+  propertyType?: string;
+  marketValue?: number;
 }
 
 export interface MissionDensity {
@@ -147,6 +169,7 @@ export interface DashboardState {
   trackingDensity: MissionDensity;
   focusCard: FocusCard;
   markets: MarketMarker[];
+  propertyDetails?: Record<string, PropertyDetail>;
   reportContent: ReportContent;
   opportunityQueue: Opportunity[];
   activityLog: AnalysisStep[];

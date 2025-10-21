@@ -5,7 +5,8 @@ import { Globe } from '../components/Globe';
 import { LoadingScreen } from '../components/LoadingScreen';
 import { MarketMap } from '../components/MarketMap';
 import { connectDashboardUpdates, fetchDashboardState } from '../services/dashboard';
-import type { DashboardState, MarketMarker } from '../types/dashboard';
+import type { DashboardState, MarketMarker, PropertyDetail } from '../types/dashboard';
+import { mockDashboardState } from '../stubs/mockDashboardState';
 import './Dashboard.css';
 
 type PanelKey = 'report' | 'opportunities' | 'activity';
@@ -96,7 +97,7 @@ const hasBulletPrefix = (line: string) => {
   return (
     trimmed.startsWith('- ') ||
     trimmed.startsWith('* ') ||
-    trimmed.startsWith('•') ||
+    trimmed.startsWith('â€¢') ||
     trimmed.startsWith('\u2022') ||
     trimmed.startsWith('\u25CF') ||
     trimmed.startsWith('\u25AA') ||
@@ -296,6 +297,7 @@ export const Dashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'globe' | 'map'>('globe');
   const [selectedMarket, setSelectedMarket] = useState<MarketMarker | null>(null);
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [globeReady, setGlobeReady] = useState(false);
   const [introProgress, setIntroProgress] = useState(8);
 
@@ -318,6 +320,24 @@ export const Dashboard = () => {
 
     setGlobeReady(false);
     setError(null);
+
+    if (requestedProjectId === 'proj-123') {
+      const cachedMock = loadCachedDashboardState(requestedProjectId);
+      if (cachedMock) {
+        setState(cachedMock);
+        setLoading(false);
+        setIntroProgress((prev) => (prev < 92 ? 92 : prev));
+        console.log('[Dashboard] Using cached mock data for proj-123');
+        return;
+      }
+      setState(mockDashboardState);
+      setLoading(false);
+      setIntroProgress((prev) => (prev < 92 ? 92 : prev));
+      console.log('[Dashboard] Loaded mock project proj-123 without cached data');
+      return () => {
+        controller.abort();
+      };
+    }
 
     const cachedState = loadCachedDashboardState(requestedProjectId);
     if (cachedState) {
@@ -381,10 +401,11 @@ export const Dashboard = () => {
     }
     setViewMode('globe');
     setSelectedMarket(null);
+    setSelectedPropertyId(null);
   }, [state?.project.id]);
 
   useEffect(() => {
-    if (selectedMarket && viewMode !== 'map') {
+    if (selectedMarket && !selectedMarket.parcelId && viewMode !== 'map') {
       setViewMode('map');
     }
   }, [selectedMarket, viewMode]);
@@ -418,7 +439,7 @@ export const Dashboard = () => {
 
   const introProjectLine = useMemo(() => {
     if (state) {
-      return `${state.project.name} · ${state.project.market}`;
+      return `${state.project.name} Â� ${state.project.market}`;
     }
     if (requestedProjectId) {
       return `Project ${requestedProjectId}`;
@@ -429,7 +450,7 @@ export const Dashboard = () => {
   const { status: introStatus, detail: introDetail, caption: introCaption } = useMemo(() => {
     const withProject = (base?: string) => {
       if (introProjectLine) {
-        return base ? `${base} · ${introProjectLine}` : introProjectLine;
+        return base ? `${base} Â� ${introProjectLine}` : introProjectLine;
       }
       return base;
     };
@@ -481,6 +502,27 @@ export const Dashboard = () => {
   const showIntroOverlay = isWaitingForGlobe || introProgress < 100;
 
   const markers = useMemo(() => state?.markets ?? [], [state]);
+  const propertyDetails = state?.propertyDetails ?? {};
+  const selectedParcelId = selectedPropertyId ?? selectedMarket?.parcelId ?? null;
+  const selectedPropertyDetail = useMemo(
+    () => (selectedParcelId ? propertyDetails[selectedParcelId] : undefined),
+    [propertyDetails, selectedParcelId],
+  );
+  const opportunities = state?.opportunityQueue ?? [];
+  const filteredOpportunities = useMemo(() => {
+    if (!selectedPropertyId) {
+      return opportunities;
+    }
+    const parcelLower = selectedPropertyId.toLowerCase();
+    return opportunities.filter((row) => {
+      const haystack = [row.property, row.signal, row.action, row.market]
+        .filter((value): value is string => typeof value === 'string' && value.length > 0)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(parcelLower);
+    });
+  }, [opportunities, selectedPropertyId]);
+
   const primaryMarket = useMemo<MarketMarker | null>(() => {
     if (!state) {
       return null;
@@ -493,6 +535,30 @@ export const Dashboard = () => {
   const handleGlobeReady = useCallback(() => {
     setGlobeReady(true);
   }, []);
+  const handleClearPropertyFilter = useCallback(() => {
+    setSelectedPropertyId(null);
+    setSelectedMarket(null);
+  }, []);
+  const handleExportJson = useCallback(() => {
+    if (!state) {
+      return;
+    }
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      state,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const fileName = `${state.project.id}-dominion-report.json`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [state]);
 
   if (!state) {
     if (loading) {
@@ -549,6 +615,12 @@ export const Dashboard = () => {
                 ) ?? (marker as MarketMarker);
               setSelectedMarket(candidate);
               setViewMode('map');
+              if (candidate.parcelId) {
+                setSelectedPropertyId(candidate.parcelId);
+                setActivePanel('opportunities');
+              } else {
+                setSelectedPropertyId(null);
+              }
             }}
           />
         </div>
@@ -557,7 +629,8 @@ export const Dashboard = () => {
             <MarketMap
               market={selectedMarket}
               className="dashboard__map"
-              renderOverlay={false}
+              renderOverlay
+              propertyDetail={selectedPropertyDetail}
               onBack={() => {
                 setViewMode('globe');
                 setSelectedMarket(null);
@@ -594,7 +667,7 @@ export const Dashboard = () => {
               <span className="dashboard__live-dot" />
               <span>{state.isLive ? 'Live updates enabled' : 'Live updates paused'}</span>
             </div>
-            <button type="button" className="dashboard__sidebar-primary">
+            <button type="button" className="dashboard__sidebar-primary" onClick={handleExportJson}>
               Export JSON
             </button>
           </div>
@@ -625,7 +698,7 @@ export const Dashboard = () => {
             <span>{state.trackingDensity.label}</span>
             <strong>{state.trackingDensity.value}</strong>
           </div>
-          {isMapView && (
+          {isMapView && !selectedPropertyId && (
             <div className="dashboard__focus-card">
               <div className="dashboard__focus-card-main">
                 <div className="dashboard__focus-card-title">
@@ -652,6 +725,7 @@ export const Dashboard = () => {
                   onClick={() => {
                     setViewMode('globe');
                     setSelectedMarket(null);
+                    setSelectedPropertyId(null);
                   }}
                 >
                   Back to globe
@@ -659,20 +733,21 @@ export const Dashboard = () => {
               </div>
             </div>
           )}
+
         </section>
 
         <aside className="dashboard__widgets">
           <div className="dashboard__widgets-tabs">
             <button
               type="button"
-              className={`dashboard__widgets-tab ${activePanel === 'report' ? 'dashboard__widgets-tab--active' : ''}`}
+              className={`dashboard__widgets-tab dashboard__widgets-tab--report ${activePanel === 'report' ? 'dashboard__widgets-tab--active' : ''}`}
               onClick={() => setActivePanel('report')}
             >
               Report
             </button>
             <button
               type="button"
-              className={`dashboard__widgets-tab ${
+              className={`dashboard__widgets-tab dashboard__widgets-tab--opportunities ${
                 activePanel === 'opportunities' ? 'dashboard__widgets-tab--active' : ''
               }`}
               onClick={() => setActivePanel('opportunities')}
@@ -681,7 +756,7 @@ export const Dashboard = () => {
             </button>
             <button
               type="button"
-              className={`dashboard__widgets-tab ${activePanel === 'activity' ? 'dashboard__widgets-tab--active' : ''}`}
+              className={`dashboard__widgets-tab dashboard__widgets-tab--activity ${activePanel === 'activity' ? 'dashboard__widgets-tab--active' : ''}`}
               onClick={() => setActivePanel('activity')}
             >
               Activity
@@ -796,37 +871,96 @@ export const Dashboard = () => {
               <>
                 <header className="dashboard__widget-header">
                   <span>Opportunity queue</span>
-                  <span className="dashboard__widget-tag">Auto-ranked</span>
+                  {selectedPropertyId ? (
+                    <span className="dashboard__widget-tag">Filtered</span>
+                  ) : (
+                    <span className="dashboard__widget-tag">Auto-ranked</span>
+                  )}
                 </header>
                 <div className="dashboard__widget-scroll">
+                  {selectedPropertyId && (
+                    <div className="dashboard__queue-filter">
+                      <div>
+                        Viewing opportunities for{' '}
+                        <strong>{selectedPropertyDetail?.address ?? selectedPropertyId}</strong>
+                      </div>
+                      {selectedPropertyDetail && (
+                        <dl className="dashboard__queue-filter-meta">
+                          <div>
+                            <dt>Parcel</dt>
+                            <dd>{selectedPropertyDetail.parcelId}</dd>
+                          </div>
+                          {selectedPropertyDetail.propertyType && (
+                            <div>
+                              <dt>Type</dt>
+                              <dd>{selectedPropertyDetail.propertyType}</dd>
+                            </div>
+                          )}
+                          {typeof selectedPropertyDetail.marketValue === 'number' && (
+                            <div>
+                              <dt>Market value</dt>
+                              <dd>{selectedPropertyDetail.marketValue.toLocaleString(undefined, {
+                                style: 'currency',
+                                currency: 'USD',
+                                maximumFractionDigits: 0,
+                              })}</dd>
+                            </div>
+                          )}
+                        </dl>
+                      )}
+                      <button type="button" onClick={handleClearPropertyFilter}>
+                        Show all opportunities
+                      </button>
+                    </div>
+                  )}
                   <ul className="dashboard__queue">
-                    {state.opportunityQueue.map((row) => (
-                      <li key={row.id}>
-                        <div className="dashboard__queue-entity">
-                          <span className="dashboard__queue-name">{row.entity ?? row.property ?? row.market}</span>
-                          <span className="dashboard__queue-market">{row.market}</span>
-                        </div>
-                        <div className="dashboard__queue-meta">
-                          <span>{row.signal}</span>
-                          <span>Lead {row.leadTime}</span>
-                          <span className="dashboard__queue-confidence">
-                            Confidence{' '}
-                            <strong>{`${row.confidenceLabel} (${formatConfidence(row.confidence)})`}</strong>
-                          </span>
-                        </div>
-                        <div className="dashboard__queue-meta">
-                          <span>Action: {row.action}</span>
-                          {row.estimatedReturn && <span>Return {row.estimatedReturn}</span>}
-                        </div>
-                        {row.risks && row.risks.length > 0 && (
-                          <div className="dashboard__queue-risks">Risks: {row.risks.join(' | ')}</div>
-                        )}
-                        <div className="dashboard__queue-status">
-                          <span className={`dashboard__queue-status-dot dashboard__queue-status-dot--${row.status}`} />
-                          <span>{row.status.replace('_', ' ')}</span>
-                        </div>
-                      </li>
-                    ))}
+                    {filteredOpportunities.length === 0 ? (
+                      <li className="dashboard__queue-empty">No opportunities found for this property yet.</li>
+                    ) : (
+                      filteredOpportunities.map((row) => (
+                        <li key={row.id}>
+                          <div className="dashboard__queue-entity">
+                            <span className="dashboard__queue-name">{row.entity ?? row.property ?? row.market}</span>
+                            <span className="dashboard__queue-market">{row.market}</span>
+                          </div>
+                          <div className="dashboard__queue-meta">
+                            <span>{row.signal}</span>
+                            <span>Lead {row.leadTime}</span>
+                            <span className="dashboard__queue-confidence">
+                              Confidence{' '}
+                              <strong>{`${row.confidenceLabel} (${formatConfidence(row.confidence)})`}</strong>
+                            </span>
+                          </div>
+                          <div className="dashboard__queue-meta">
+                            <span>Action: {row.action}</span>
+                            {row.estimatedReturn && <span>Return {row.estimatedReturn}</span>}
+                          </div>
+                          <div className="dashboard__queue-meta">
+                            {row.signalType && (
+                              <span className="dashboard__queue-chip">{row.signalType.replace(/_/g, ' ')}</span>
+                            )}
+                            <span>
+                              Discovered{' '}
+                              {row.discoveredAt ? formatRelativeTime(row.discoveredAt) : 'n/a'}
+                            </span>
+                          </div>
+                          {row.supportingTools && row.supportingTools.length > 0 && (
+                            <div className="dashboard__queue-tools">
+                              {row.supportingTools.map((tool) => (
+                                <span key={tool}>{tool}</span>
+                              ))}
+                            </div>
+                          )}
+                          {row.risks && row.risks.length > 0 && (
+                            <div className="dashboard__queue-risks">Risks: {row.risks.join(' | ')}</div>
+                          )}
+                          <div className="dashboard__queue-status">
+                            <span className={`dashboard__queue-status-dot dashboard__queue-status-dot--${row.status}`} />
+                            <span>{row.status.replace('_', ' ')}</span>
+                          </div>
+                        </li>
+                      ))
+                    )}
                   </ul>
                 </div>
               </>

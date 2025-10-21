@@ -23,7 +23,7 @@ Dominion delivers an autonomous, multi-agent analyst that reasons over instituti
 
 ## Architecture
 
-`[Architecture Diagram image]`
+![AWS Architecture Diagram](aws-architecture.png)
 
 The frontend (React + TypeScript + Vite) collects analyst prompts and streams progress updates. A Bedrock AgentCore app hosted on Lambda Function URLs orchestrates the workflow: the supervisor agent decomposes the task, specialists call Lambda tools for property search, ordinance RAG, and enrichment, and the custom-embedded Aurora pgvector store returns ground-truth evidence. Infrastructure is provisioned via AWS CDK: Aurora Serverless v2 (RDS Data API + Secrets Manager), dedicated tool Lambdas, and the AgentCore multi-agent runtime. Logs, health pings, and long-running sessions are handled inside AgentCore so the agents stay responsive throughout 10–20 minute analyses.
 
