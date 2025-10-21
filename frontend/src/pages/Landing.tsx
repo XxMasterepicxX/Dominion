@@ -105,7 +105,7 @@ const roadmapPhases = [
   {
     phase: 'Phase 2',
     status: 'In Development',
-    timeline: 'Q1 2025',
+    timeline: 'Q1 2026',
     title: 'Financial Modeling & Valuation',
     description:
       'Builds dynamic cash-flow models, evaluates IRR and NPV, and stress-tests exit strategies before capital is committed.',
@@ -113,7 +113,7 @@ const roadmapPhases = [
   {
     phase: 'Phase 3',
     status: 'Planned',
-    timeline: 'Q2 2025',
+    timeline: 'Q2 2026',
     title: 'Predictive Analytics & Forecasting',
     description:
       'Learns developer behavior patterns, predicts absorption twelve to twenty four months ahead, and surfaces early indicators worth watching.',
@@ -121,7 +121,7 @@ const roadmapPhases = [
   {
     phase: 'Phase 4',
     status: 'Planned',
-    timeline: 'Q3-Q4 2025',
+    timeline: 'Q3-Q4 2026',
     title: 'Autonomous Decision Intelligence',
     description:
       'Produces buy, hold, and sell guidance with traceable confidence and optimizes portfolios across markets in near real time.',
