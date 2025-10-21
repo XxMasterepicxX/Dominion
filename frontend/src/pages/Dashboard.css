@@ -853,6 +853,33 @@
   color: var(--color-ink-muted);
 }
 
+.dashboard__report-text {
+  margin: 0;
+  white-space: pre-line;
+  color: var(--color-ink);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.dashboard__report-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  list-style: disc;
+  color: var(--color-ink);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.dashboard__focus-card-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--color-ink);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
 .dashboard__report-metrics {
   list-style: none;
   margin: 0;
@@ -1132,3 +1159,4 @@
     justify-content: flex-start;
   }
 }
+

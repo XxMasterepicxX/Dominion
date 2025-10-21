@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchProjects } from '../services/dashboard';
 import type { ProjectSummary, ProjectType, ProjectStatus } from '../types/dashboard';
+import { getStoredProjectSummaries } from '../utils/projectStorage';
 import './Projects.css';
 
 const TYPE_LABELS: Record<ProjectType, string> = {
@@ -34,6 +35,7 @@ const formatConfidence = (value?: number) => {
 const formatProgress = (progress: number) => Math.min(100, Math.max(0, Math.round(progress)));
 
 export const Projects = () => {
+  
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +44,23 @@ export const Projects = () => {
     const controller = new AbortController();
     fetchProjects({ signal: controller.signal })
       .then((data) => {
-        setProjects(data);
+        // Merge with locally stored summaries (drafts, imported completes, local generating)
+        const local = getStoredProjectSummaries();
+        const combinedMap = new Map<string, ProjectSummary>();
+        [...data, ...local].forEach((item) => {
+          const existing = combinedMap.get(item.id);
+          if (!existing) {
+            combinedMap.set(item.id, item);
+          } else {
+            // Prefer the one with the most recent lastUpdated
+            const existingDate = new Date(existing.lastUpdated).getTime();
+            const incomingDate = new Date(item.lastUpdated).getTime();
+            if (incomingDate >= existingDate) {
+              combinedMap.set(item.id, { ...existing, ...item });
+            }
+          }
+        });
+        setProjects(Array.from(combinedMap.values()));
         setError(null);
       })
       .catch((err) => {
@@ -56,6 +74,8 @@ export const Projects = () => {
 
     return () => controller.abort();
   }, []);
+
+  
 
   const groupedProjects = useMemo(() => {
     const live = projects.filter((project) => project.status === 'live');
