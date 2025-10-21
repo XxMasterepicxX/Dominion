@@ -302,10 +302,14 @@
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
 
-.projects__open:hover {
-  transform: translateX(2px);
-  border-color: var(--color-accent);
+.projects__open--draft {
+    border-style: dashed;
 }
+
+.projects__open:hover {
+    transform: translateX(2px);
+    border-color: var(--color-accent);
+  }
 
 @media (max-width: 960px) {
   .projects__lead {

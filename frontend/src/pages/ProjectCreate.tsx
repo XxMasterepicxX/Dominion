@@ -1,9 +1,19 @@
-﻿import { FormEvent, MouseEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { ChangeEvent, FormEvent, MouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { analyzeWithAgent, transformAgentResponseToDashboard } from '../services/dashboard';
-import type { ProjectSetup, ProjectType, DashboardState } from '../types/dashboard';
+import type { ProjectSetup, ProjectType, DashboardState, ProjectSummary, ProjectStatus } from '../types/dashboard';
 import { LoadingScreen } from '../components/LoadingScreen';
 import './ProjectCreate.css';
+import { storeDashboardState } from '../utils/dashboardStorage';
+
+import {
+  deleteDraftSetup,
+  loadDraftSetup,
+  saveDraftSetup,
+  upsertStoredProjectSummary,
+  getStoredProjectSummaries,
+  removeStoredProjectSummary,
+} from '../utils/projectStorage';
 
 const PROJECT_TYPES: Array<{ value: ProjectType; label: string; description: string }> = [
   { value: 'developer_following', label: 'Developer following', description: 'Track an entity and surface nearby moves.' },
@@ -13,6 +23,19 @@ const PROJECT_TYPES: Array<{ value: ProjectType; label: string; description: str
   { value: 'assemblage_investigation', label: 'Assemblage investigation', description: 'Identify clustering and gap parcels.' },
   { value: 'exit_strategy', label: 'Exit strategy', description: 'Find buyers and disposition options.' },
 ];
+
+const deriveMarketCode = (market: string, provided?: string) =>
+  provided && provided.trim().length > 0 ? provided : market.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+
+const truncate = (value: string, limit = 200) => {
+  if (!value) return '';
+  return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+};
+
+const generateProjectId = () => `proj-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+const isValidProjectType = (value: unknown): value is ProjectType =>
+  typeof value === 'string' && PROJECT_TYPES.some((option) => option.value === value);
 
 const MARKET_OPTIONS = [
   { label: 'Gainesville, FL', code: 'gainesville_fl' },
@@ -66,6 +89,7 @@ type StageId = (typeof STAGES)[number]['id'];
 
 export const ProjectCreate = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [form, setForm] = useState<ProjectSetup>(initialSetup);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +97,8 @@ export const ProjectCreate = () => {
   const [hasChanges, setHasChanges] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisStatus, setAnalysisStatus] = useState<string>('Initializing...');
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const draftIdRef = useRef<string | null>(null);
 
   const requiredFields = useMemo(() => REQUIRED_BY_TYPE[form.type] ?? [], [form.type]);
   const currentStage = STAGES[currentStageIndex];
@@ -81,8 +107,70 @@ export const ProjectCreate = () => {
     [form.marketCode],
   );
 
+  useEffect(() => {
+    const draftId = searchParams.get('draft');
+    if (!draftId) {
+      return;
+    }
+    const draftSetup = loadDraftSetup(draftId);
+    if (!draftSetup) {
+      return;
+    }
+    draftIdRef.current = draftId;
+    setForm({
+      ...initialSetup,
+      ...draftSetup,
+      analysisScope: { ...DEFAULT_SCOPE, ...(draftSetup.analysisScope ?? DEFAULT_SCOPE) },
+      criteria: draftSetup.criteria ?? {},
+      marketCode: deriveMarketCode(draftSetup.market, draftSetup.marketCode),
+    });
+    setHasChanges(false);
+  }, [searchParams]);
+
   const markDirty = () => {
     setHasChanges(true);
+  };
+
+  const ensureProjectId = () => {
+    if (!draftIdRef.current) {
+      draftIdRef.current = generateProjectId();
+    }
+    return draftIdRef.current;
+  };
+
+  const buildSummary = (id: string, status: ProjectStatus, progress: number, description: string, overrides: Partial<ProjectSummary> = {}): ProjectSummary => {
+    const existing = getStoredProjectSummaries().find((entry) => entry.id === id);
+    const createdAt = overrides.createdAt ?? existing?.createdAt ?? new Date().toISOString();
+    return {
+      id,
+      name: form.name.trim() || 'Untitled initiative',
+      type: form.type,
+      market: form.market,
+      marketCode: deriveMarketCode(form.market, form.marketCode),
+      status,
+      progress,
+      createdAt,
+      lastUpdated: overrides.lastUpdated ?? new Date().toISOString(),
+      description: truncate(description),
+      confidence: overrides.confidence ?? existing?.confidence,
+      opportunities: overrides.opportunities ?? existing?.opportunities,
+    };
+  };
+
+  const persistDraftSummary = () => {
+    const id = ensureProjectId();
+    const summary = buildSummary(id, 'draft', 0, form.strategy?.trim() || `Draft for ${form.market}`);
+    upsertStoredProjectSummary(summary);
+    const serialized: ProjectSetup = JSON.parse(JSON.stringify({
+      ...form,
+      marketCode: deriveMarketCode(form.market, form.marketCode),
+    }));
+    saveDraftSetup(id, serialized);
+  };
+
+  const clearDraftData = (id: string) => {
+    deleteDraftSetup(id);
+    removeStoredProjectSummary(id);
   };
 
   const handleInput = (key: keyof ProjectSetup, value: unknown) => {
@@ -113,6 +201,104 @@ export const ProjectCreate = () => {
         [key]: value,
       },
     }));
+  };
+
+  const handleImportJsonClick = () => {
+    setError(null);
+    importInputRef.current?.click();
+  };
+
+  const handleImportJsonChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      setError('Please select a JSON file.');
+      event.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const raw = reader.result?.toString();
+        if (!raw) {
+          throw new Error('Empty file');
+        }
+
+        const parsed = JSON.parse(raw);
+        const projectPayload =
+          parsed?.projectSetup ??
+          parsed?.setup ??
+          parsed?.project ??
+          parsed?.state?.project ??
+          parsed;
+
+        if (!projectPayload || typeof projectPayload !== 'object') {
+          throw new Error('No project payload found');
+        }
+
+        const pickString = (value: unknown) => (typeof value === 'string' && value.trim().length > 0 ? value : undefined);
+        const pickNumber = (value: unknown) => (typeof value === 'number' ? value : undefined);
+
+        const importedId = pickString(projectPayload.id) ?? pickString((projectPayload as any).projectId);
+        const projectId = importedId ?? generateProjectId();
+        const name = pickString(projectPayload.name) ?? pickString((projectPayload as any).projectName) ?? 'Imported project';
+        const typeCandidate = pickString(projectPayload.type);
+        const type: ProjectType = isValidProjectType(typeCandidate) ? typeCandidate : 'market_research';
+        const market = pickString(projectPayload.market) ?? pickString((projectPayload as any).marketName) ?? form.market;
+        const marketCode = deriveMarketCode(market, pickString(projectPayload.marketCode));
+        const summarySource =
+          pickString(parsed?.state?.reportContent?.summary) ??
+          pickString((projectPayload as any).description) ??
+          pickString((projectPayload as any).summary) ??
+          form.strategy ??
+          'Imported Dominion analysis.';
+        const createdAt = pickString((projectPayload as any).createdAt) ?? pickString((projectPayload as any).generatedAt) ?? new Date().toISOString();
+        const lastUpdated = pickString((projectPayload as any).lastUpdated) ?? pickString((projectPayload as any).updatedAt) ?? createdAt;
+        const confidence = pickNumber((projectPayload as any).confidence) ?? pickNumber(parsed?.state?.project?.confidence);
+        const opportunities = pickNumber((projectPayload as any).opportunities) ?? pickNumber(parsed?.state?.project?.opportunities);
+
+        const summary: ProjectSummary = {
+          id: projectId,
+          name,
+          type,
+          market,
+          marketCode,
+          status: 'complete',
+          progress: 100,
+          createdAt,
+          lastUpdated,
+          description: truncate(summarySource),
+          confidence,
+          opportunities,
+        };
+
+        upsertStoredProjectSummary(summary);
+        deleteDraftSetup(projectId);
+        draftIdRef.current = null;
+        setHasChanges(false);
+
+        if (parsed?.state) {
+          sessionStorage.setItem(
+            `dominion/dashboard/${projectId}`,
+            JSON.stringify({
+              version: 1,
+              savedAt: Date.now(),
+              state: parsed.state,
+            }),
+          );
+        }
+
+        navigate('/projects');
+      } catch (err) {
+        console.error('[ProjectCreate] Import JSON failed', err);
+        setError(err instanceof Error ? err.message : 'Could not import project JSON. Please verify the file format.');
+      }
+    };
+
+    reader.readAsText(file);
+    event.target.value = '';
   };
 
   const validateStage = (stageId: StageId) => {
@@ -196,23 +382,33 @@ export const ProjectCreate = () => {
       setError(validation);
       return;
     }
-    goToStage(Math.min(STAGES.length - 1, currentStageIndex + 1));
+    const nextIndex = Math.min(STAGES.length - 1, currentStageIndex + 1);
+    if (nextIndex === currentStageIndex) {
+      return;
+    }
+    setTimeout(() => goToStage(nextIndex), 0);
   };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    const validation = validate();
-    if (validation) {
-      setError(validation);
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
+  const validation = validate();
+  if (validation) {
+    setError(validation);
+    return;
+  }
+  const projectId = ensureProjectId();
+  const generatingSummary = buildSummary(
+    projectId,
+    'generating',
+    15,
+    form.strategy?.trim() || `Generating ${form.market} intelligence charter.`,
+  );
+  upsertStoredProjectSummary(generatingSummary);
+  deleteDraftSetup(projectId);
+  setSubmitting(true);
+  setError(null);
 
-    try {
-      // Generate project ID
-      const projectId = `proj-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
+  try {
       // Build comprehensive prompt with ALL form data
       let prompt = '';
 
@@ -292,7 +488,22 @@ export const ProjectCreate = () => {
           state: dashboardState,
         }));
 
+        const completedSummary = buildSummary(
+          projectId,
+          'complete',
+          100,
+          dashboardState.reportContent.summary || generatingSummary.description,
+          {
+            createdAt: generatingSummary.createdAt,
+            lastUpdated: new Date().toISOString(),
+            confidence: dashboardState.project.confidence,
+            opportunities: dashboardState.project.opportunities,
+          },
+        );
+        upsertStoredProjectSummary(completedSummary);
+
         setHasChanges(false);
+        draftIdRef.current = null;
         navigate(`/dashboard?projectId=${projectId}`);
       } catch (err) {
         clearInterval(progressInterval);
@@ -300,6 +511,21 @@ export const ProjectCreate = () => {
       }
     } catch (err) {
       console.error('[ProjectCreate] Error:', err);
+      const draftSummary = buildSummary(
+        projectId,
+        'draft',
+        0,
+        form.strategy?.trim() || `Draft for ${form.market}`,
+        { createdAt: generatingSummary.createdAt },
+      );
+      upsertStoredProjectSummary(draftSummary);
+      saveDraftSetup(
+        projectId,
+        JSON.parse(JSON.stringify({
+          ...form,
+          marketCode: deriveMarketCode(form.market, form.marketCode),
+        })) as ProjectSetup,
+      );
       setError(err instanceof Error ? err.message : 'Unable to analyze project. Please try again.');
     } finally {
       setSubmitting(false);
@@ -321,14 +547,29 @@ export const ProjectCreate = () => {
   }, [hasChanges]);
 
   const handleBackToProjects = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (hasChanges) {
-      const proceed = window.confirm('You have unsaved progress. Save before leaving?');
-      if (!proceed) {
-        event.preventDefault();
-        return;
-      }
+    if (!hasChanges) {
+      setHasChanges(false);
+      return;
     }
-    setHasChanges(false);
+
+    event.preventDefault();
+    const saveDraft = window.confirm('Save this project as a draft before leaving?');
+    if (saveDraft) {
+      persistDraftSummary();
+      setHasChanges(false);
+      navigate('/projects');
+      return;
+    }
+
+    const discard = window.confirm('Discard changes and leave?');
+    if (discard) {
+      if (draftIdRef.current) {
+        clearDraftData(draftIdRef.current);
+        draftIdRef.current = null;
+      }
+      setHasChanges(false);
+      navigate('/projects');
+    }
   };
 
   const renderStage = (stageId: StageId): ReactNode => {
@@ -603,7 +844,7 @@ export const ProjectCreate = () => {
         title="Multi-Agent Analysis"
         subtitle="AWS Bedrock AgentCore"
         status={analysisStatus}
-        detail={`Analyzing ${form.market} real estate opportunities · ${form.type.replace(/_/g, ' ')}`}
+        detail={`Analyzing ${form.market} real estate opportunities â€“ ${form.type.replace(/_/g, ' ')}`}
         progress={analysisProgress}
         progressCaption={`Session: ${form.name.substring(0, 30)}...`}
         accentLabel="Dominion Intelligence"
@@ -617,10 +858,22 @@ export const ProjectCreate = () => {
         <p className="project-create__eyebrow">New Dominion project</p>
         <div className="project-create__title-row">
           <h1>Charter a fresh intelligence initiative.</h1>
-          <Link className="project-create__back" to="/projects" onClick={handleBackToProjects}>
-            {'<< BACK TO PROJECTS'}
-          </Link>
+          <div className="project-create__title-actions">
+            <button type="button" className="project-create__import" onClick={handleImportJsonClick}>
+              Import JSON
+            </button>
+            <Link className="project-create__back" to="/projects" onClick={handleBackToProjects}>
+              {'<< BACK TO PROJECTS'}
+            </Link>
+          </div>
         </div>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json"
+          onChange={handleImportJsonChange}
+          className="project-create__import-input"
+        />
         <p className="project-create__intro">
           Step through the briefing, tune the focus, and Dominion will assemble the data fabric that aligns with your objective.
         </p>
@@ -703,3 +956,9 @@ export const ProjectCreate = () => {
 };
 
 export default ProjectCreate;
+
+
+
+
+
+

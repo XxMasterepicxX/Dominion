@@ -2,6 +2,8 @@ import type { DashboardState, ProjectSetup, ProjectSummary } from '../types/dash
 import { mockDashboardState } from '../stubs/mockDashboardState';
 import { mockProjects } from '../stubs/mockProjects';
 import { parseAgentMarkdown } from '../utils/markdownParser';
+import { upsertStoredProjectSummary } from '../utils/projectStorage';
+// ProjectSummary already imported in types above when needed
 
 const DEFAULT_PROJECT_ID = 'proj-123';
 // Vite exposes env vars on import.meta.env in the browser; fall back to process.env for node environments
@@ -58,6 +60,77 @@ type ConnectLiveUpdatesOptions = {
 };
 
 const WS_BASE_URL = (getEnv('REACT_APP_WS_BASE_URL') as string | undefined)?.replace(/\/$/, '') ?? '';
+
+// Local cache keys for imported reports
+const REPORT_CACHE_PREFIX = 'dominion/dashboard/';
+const REPORT_CACHE_VERSION = 1;
+
+type CachedReportEnvelope = {
+  version: number;
+  savedAt: number;
+  state: any; // DashboardState shape - keep generic for imported reports
+};
+
+/**
+ * Import a dashboard JSON (from file or parsed object) and register it locally as a completed report.
+ * This saves the dashboard state to localStorage so the Dashboard page can load it by projectId.
+ */
+export async function importReportFromJson(report: any, filename?: string): Promise<ProjectSummary> {
+  // Determine project id
+  const projectId = report?.project?.id || (filename ? filename.replace(/\.json$/i, '') : `proj-${Date.now()}`);
+
+  const now = new Date().toISOString();
+
+  // Build a minimal ProjectSummary to show in Projects list
+  const summary: ProjectSummary = {
+    id: projectId,
+    name: report?.project?.name || `Imported report ${projectId}`,
+    type: (report?.project?.type as any) || 'market_research',
+    market: report?.project?.market || (report?.reportContent?.marketContext || 'Imported market'),
+    marketCode: report?.project?.marketCode || undefined,
+    status: 'complete',
+    progress: 100,
+    createdAt: now,
+    lastUpdated: now,
+    description: report?.reportContent?.summary || report?.project?.name || 'Imported Dominion report',
+    confidence: report?.reportContent?.confidence ?? report?.project?.confidence ?? undefined,
+    opportunities: report?.opportunityQueue?.length ?? 0,
+  };
+
+  try {
+    const envelope: CachedReportEnvelope = {
+      version: REPORT_CACHE_VERSION,
+      savedAt: Date.now(),
+      state: report,
+    };
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(`${REPORT_CACHE_PREFIX}${projectId}`, JSON.stringify(envelope));
+    }
+  } catch (e) {
+    console.warn('[dashboard] failed to persist imported report to localStorage', e);
+  }
+
+  // Also store a local ProjectSummary so Projects page can merge/display it regardless of API
+  try {
+    upsertStoredProjectSummary(summary);
+  } catch {
+    // ignore
+  }
+
+  // Register in mockProjects so fetchProjects fallback will show it
+  try {
+    // ensure no duplicate id
+    const existsIndex = mockProjects.findIndex((p) => p.id === summary.id);
+    if (existsIndex !== -1) {
+      mockProjects.splice(existsIndex, 1);
+    }
+    mockProjects.unshift(summary);
+  } catch (e) {
+    // ignore
+  }
+
+  return summary;
+}
 
 export function connectDashboardUpdates({ projectId = DEFAULT_PROJECT_ID, onUpdate }: ConnectLiveUpdatesOptions) {
   if (!WS_BASE_URL) {

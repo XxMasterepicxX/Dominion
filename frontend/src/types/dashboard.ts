@@ -80,6 +80,7 @@ export interface ReportSection {
   content: string;
   metrics?: ReportSectionMetric[];
   data?: unknown;
+  list?: string[];
 }
 
 export interface ReportContent {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import logo from '../assets/logo.png';
 import { Globe } from '../components/Globe';
@@ -42,6 +42,185 @@ const formatConfidence = (value?: number) => {
 const formatToolName = (toolName: string) =>
   toolName.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 
+type InlineSegment = {
+  content: string;
+  bold: boolean;
+};
+
+type MarkdownBlock =
+  | { type: 'paragraph'; lines: InlineSegment[][] }
+  | { type: 'list'; items: InlineSegment[][] };
+
+const MISENCODED_BULLET = '\u00E2\u20AC\u00A2';
+
+// Remove zero-width and non-breaking whitespace that can cause subtle misalignment in labels
+const sanitizeInlineLabel = (text: string): string =>
+  (text ?? '')
+    .replace(/[\u200B\u200C\u200D\uFEFF\u00A0]/g, ' ') // zero-width + NBSP to regular space
+    .replace(/\s+/g, ' ') // collapse runs of whitespace
+    .trim();
+
+const tokenizeInlineSegments = (line: string): InlineSegment[] => {
+  const segments: InlineSegment[] = [];
+  const regex = /\*\*(.+?)\*\*/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(line)) !== null) {
+    if (match.index > lastIndex) {
+      const preceding = line.slice(lastIndex, match.index);
+      if (preceding) {
+        segments.push({ content: preceding, bold: false });
+      }
+    }
+    segments.push({ content: match[1], bold: true });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < line.length) {
+    const remaining = line.slice(lastIndex);
+    if (remaining) {
+      segments.push({ content: remaining, bold: false });
+    }
+  }
+
+  if (segments.length === 0) {
+    segments.push({ content: line, bold: false });
+  }
+
+  return segments;
+};
+
+const hasBulletPrefix = (line: string) => {
+  const trimmed = line.trimStart();
+  return (
+    trimmed.startsWith('- ') ||
+    trimmed.startsWith('* ') ||
+    trimmed.startsWith('•') ||
+    trimmed.startsWith('\u2022') ||
+    trimmed.startsWith('\u25CF') ||
+    trimmed.startsWith('\u25AA') ||
+    trimmed.startsWith(MISENCODED_BULLET)
+  );
+};
+
+const stripBulletPrefix = (line: string) => {
+  let trimmed = line.trimStart();
+  if (trimmed.startsWith(MISENCODED_BULLET)) {
+    trimmed = trimmed.slice(MISENCODED_BULLET.length).trimStart();
+  }
+  if (/^[-*]\s+/.test(trimmed)) {
+    return trimmed.replace(/^[-*]\s+/, '');
+  }
+  if (/^[\u2022\u25CF\u25AA]\s*/.test(trimmed)) {
+    return trimmed.replace(/^[\u2022\u25CF\u25AA]\s*/, '');
+  }
+  return trimmed;
+};
+
+const parseSimpleMarkdownBlocks = (text: string): MarkdownBlock[] => {
+  if (!text) {
+    return [];
+  }
+
+  const cleaned = text
+    .replace(/\r/g, '')
+    .replace(new RegExp(MISENCODED_BULLET, 'g'), '- ')
+    .replace(/^\s*#+\s*/gm, '')
+    .replace(/^\s*---\s*$/gm, '')
+    .trim();
+
+  if (!cleaned) {
+    return [];
+  }
+
+  const rawBlocks = cleaned.split(/\n{2,}/);
+  const blocks: MarkdownBlock[] = [];
+
+  rawBlocks.forEach((block) => {
+    const lines = block
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    if (lines.length === 0) {
+      return;
+    }
+
+    const isList = lines.every((line) => hasBulletPrefix(line));
+
+    if (isList) {
+      blocks.push({
+        type: 'list',
+        items: lines.map((line) => tokenizeInlineSegments(stripBulletPrefix(line))),
+      });
+      return;
+    }
+
+    blocks.push({
+      type: 'paragraph',
+      lines: lines.map((line) => tokenizeInlineSegments(line)),
+    });
+  });
+
+  return blocks;
+};
+
+const renderInlineSegments = (segments: InlineSegment[], keyPrefix: string): ReactNode[] =>
+  segments.map((segment, index) =>
+    segment.bold ? (
+      <strong key={`${keyPrefix}-strong-${index}`}>{segment.content}</strong>
+    ) : (
+      <Fragment key={`${keyPrefix}-text-${index}`}>{segment.content}</Fragment>
+    ),
+  );
+
+const renderSimpleMarkdown = (
+  text: string,
+  keyPrefix: string,
+  options: { paragraphClass?: string; listClass?: string } = {},
+): ReactNode[] => {
+  const blocks = parseSimpleMarkdownBlocks(text);
+  if (blocks.length === 0) {
+    return [];
+  }
+
+  return blocks.map((block, blockIndex) => {
+    if (block.type === 'list') {
+      return (
+        <ul
+          key={`${keyPrefix}-list-${blockIndex}`}
+          className={options.listClass}
+        >
+          {block.items.map((item, itemIndex) => (
+            <li key={`${keyPrefix}-list-${blockIndex}-item-${itemIndex}`}>
+              {renderInlineSegments(item, `${keyPrefix}-list-${blockIndex}-item-${itemIndex}`)}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    const nodes: ReactNode[] = [];
+    block.lines.forEach((line, lineIndex) => {
+      nodes.push(
+        ...renderInlineSegments(line, `${keyPrefix}-paragraph-${blockIndex}-line-${lineIndex}`),
+      );
+      if (lineIndex < block.lines.length - 1) {
+        nodes.push(<br key={`${keyPrefix}-paragraph-${blockIndex}-br-${lineIndex}`} />);
+      }
+    });
+
+    return (
+      <p
+        key={`${keyPrefix}-paragraph-${blockIndex}`}
+        className={options.paragraphClass}
+      >
+        {nodes}
+      </p>
+    );
+  });
+};
 const DASHBOARD_CACHE_PREFIX = 'dominion/dashboard/';
 const DASHBOARD_CACHE_VERSION = 1;
 const DASHBOARD_CACHE_TTL_MS = 1000 * 60 * 20; // 20 minutes
@@ -455,7 +634,10 @@ export const Dashboard = () => {
                     {state.focusCard.tag}
                   </span>
                 </div>
-                <p className="dashboard__focus-card-summary">{state.focusCard.summary}</p>
+                {renderSimpleMarkdown(state.focusCard.summary, 'focus-card-summary', {
+                  paragraphClass: 'dashboard__focus-card-summary',
+                  listClass: 'dashboard__focus-card-list',
+                })}
               </div>
               <div className="dashboard__focus-card-stats">
                 {state.focusCard.stats.map((stat) => (
@@ -530,26 +712,48 @@ export const Dashboard = () => {
                       <strong>{state.reportContent.analysisType}</strong>
                     </div>
                   </div>
-                  <p className="dashboard__report-summary">{state.reportContent.summary}</p>
-                  {state.reportContent.marketContext && (
-                    <p className="dashboard__report-market">{state.reportContent.marketContext}</p>
-                  )}
+                  {renderSimpleMarkdown(state.reportContent.summary, 'report-summary', {
+                    paragraphClass: 'dashboard__report-summary',
+                    listClass: 'dashboard__report-list',
+                  })}
+                  {state.reportContent.marketContext &&
+                    renderSimpleMarkdown(state.reportContent.marketContext, 'report-market', {
+                      paragraphClass: 'dashboard__report-market',
+                      listClass: 'dashboard__report-list',
+                    })}
 
                   <div className="dashboard__report-sections">
-                    {state.reportContent.sections.map((section) => (
+                    {state.reportContent.sections.map((section, sectionIndex) => (
                       <section key={section.title} className="dashboard__report-section">
                         <header>
                           <h3>{section.title}</h3>
                         </header>
-                        <p>{section.content}</p>
-                        {section.metrics && (
+                        {section.content &&
+                          section.content.trim().length > 0 &&
+                          renderSimpleMarkdown(section.content, `section-${sectionIndex}`, {
+                            paragraphClass: 'dashboard__report-text',
+                            listClass: 'dashboard__report-list',
+                          })}
+                        {section.list && section.list.length > 0 && (
+                          <ul className="dashboard__report-list">
+                            {section.list.map((item, index) => (
+                              <li key={`${section.title}-item-${index}`}>
+                                {renderInlineSegments(
+                                  tokenizeInlineSegments(item),
+                                  `${section.title}-item-${index}`,
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {section.metrics && section.metrics.length > 0 && (
                           <ul className="dashboard__report-metrics">
                             {section.metrics.map((metric) => (
                               <li
                                 key={`${section.title}-${metric.label}`}
                                 className={metric.highlight ? 'dashboard__report-metric--highlight' : ''}
                               >
-                                <span>{metric.label}</span>
+                                <span>{sanitizeInlineLabel((metric.label ?? '').toString())}</span>
                                 <strong>{metric.value}</strong>
                               </li>
                             ))}

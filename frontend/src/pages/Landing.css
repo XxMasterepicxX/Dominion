@@ -138,6 +138,8 @@
 }
 
 .landing__metric-label {
+  display: block;
+  margin-top: 6px;
   font-size: 0.65rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -580,6 +582,7 @@
 
 .landing__visual-readout {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -587,6 +590,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.landing__visual-readout-item:first-child {
+  grid-column: 1 / -1;
 }
 
 .landing__visual-readout-label {
@@ -885,42 +892,47 @@
   color: var(--color-ink);
   box-shadow: 0 4px 16px rgba(5, 14, 24, 0.1);
   white-space: nowrap;
+  transform: translate(-50%, -50%);
 }
 
 .landing__data-node--1 {
   top: 8%;
   left: 50%;
-  transform: translateX(-50%);
 }
 
 .landing__data-node--2 {
-  top: 24%;
-  left: 84%;
-  transform: translateX(-50%);
+  top: 20%;
+  left: 80%;
 }
 
 .landing__data-node--3 {
-  bottom: 24%;
-  left: 84%;
-  transform: translateX(-50%);
+  top: 50%;
+  left: 92%;
 }
 
 .landing__data-node--4 {
-  bottom: 8%;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 80%;
+  left: 80%;
 }
 
 .landing__data-node--5 {
-  bottom: 24%;
-  left: 16%;
-  transform: translateX(-50%);
+  top: 92%;
+  left: 50%;
 }
 
 .landing__data-node--6 {
-  top: 24%;
-  left: 16%;
-  transform: translateX(-50%);
+  top: 80%;
+  left: 20%;
+}
+
+.landing__data-node--7 {
+  top: 50%;
+  left: 8%;
+}
+
+.landing__data-node--8 {
+  top: 20%;
+  left: 20%;
 }
 
 /* Roadmap */
