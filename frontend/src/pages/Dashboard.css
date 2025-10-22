@@ -1053,6 +1053,11 @@
 
 .dashboard__sidebar-item--new {
   position: relative;
+  align-self: start;
+  justify-self: stretch;
+  width: 100%;
+  margin-right: -6px;
+  padding-block: 8px;
 }
 
 .dashboard__sidebar-item--new::before {
