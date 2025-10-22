@@ -11,7 +11,7 @@ This project is a submission for the AWS AI Agent Global Hackathon.
 
 ## Demo
 
-[Link to 3-minute Demo Video]
+[[Link to Demo Video]](https://youtu.be/DInd-qoBMnk)
 
 ## The Problem
 
@@ -57,7 +57,7 @@ The frontend (React + TypeScript + Vite) collects analyst prompts and streams pr
 ### Backend Setup
 ```bash
 # Clone the repository
-git clone [Your Repo URL]
+git clone https://github.com/XxMasterepicxX/Dominion.git
 cd Dominion
 
 # Launch local data stores (Postgres + Redis) for development
