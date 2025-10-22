@@ -215,6 +215,7 @@
   margin: 0;
   padding: 0;
   display: grid;
+  align-content: start;
   gap: 10px;
   flex: 1;
   min-height: 0;
@@ -1130,7 +1131,11 @@
 .dashboard__sidebar-item--new::before {
   content: '';
   position: absolute;
-  inset: 6px 0;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: min(44px, calc(100% - 12px));
+  transform: translateY(-50%);
   background: rgba(68, 110, 135, 0.08);
   border-radius: 12px;
   z-index: 0;
