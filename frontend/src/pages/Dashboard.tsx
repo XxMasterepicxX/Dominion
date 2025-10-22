@@ -615,6 +615,14 @@ export const Dashboard = () => {
   const showIntroOverlay = isWaitingForGlobe || introProgress < 100;
 
   const markers = useMemo(() => state?.markets ?? [], [state]);
+  const propertyMarkers = useMemo(
+    () =>
+      markers.filter(
+        (marker): marker is MarketMarker & { parcelId: string } =>
+          typeof marker.parcelId === 'string' && marker.parcelId.length > 0,
+      ),
+    [markers],
+  );
   const propertyDetails = state?.propertyDetails ?? {};
   const selectedParcelId = selectedPropertyId ?? selectedMarket?.parcelId ?? null;
   const selectedPropertyDetail = useMemo(
@@ -652,6 +660,26 @@ export const Dashboard = () => {
     setSelectedPropertyId(null);
     setSelectedMarket(null);
   }, []);
+  const handleSelectNextProperty = useCallback(() => {
+    if (propertyMarkers.length === 0) {
+      return;
+    }
+    const currentId = selectedPropertyId ?? selectedMarket?.parcelId ?? null;
+    const currentIndex = currentId
+      ? propertyMarkers.findIndex((marker) => marker.parcelId === currentId)
+      : -1;
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % propertyMarkers.length;
+    const nextMarker = propertyMarkers[nextIndex];
+    if (!nextMarker) {
+      return;
+    }
+    setSelectedMarket(nextMarker);
+    setSelectedPropertyId(nextMarker.parcelId);
+    setViewMode('map');
+    if (activePanel !== 'opportunities') {
+      setActivePanel('opportunities');
+    }
+  }, [activePanel, propertyMarkers, selectedMarket, selectedPropertyId]);
   const handleToggleLive = useCallback(() => {
     setState((prev) => {
       if (!prev) {
@@ -773,6 +801,7 @@ export const Dashboard = () => {
               className="dashboard__map"
               renderOverlay
               propertyDetail={selectedPropertyDetail}
+              onNextProperty={propertyMarkers.length > 0 ? handleSelectNextProperty : undefined}
               onBack={() => {
                 setViewMode('globe');
                 setSelectedMarket(null);
@@ -1045,11 +1074,11 @@ export const Dashboard = () => {
                         Viewing opportunities for{' '}
                         <strong>{selectedPropertyDetail?.address ?? selectedPropertyId}</strong>
                       </div>
-                      {selectedPropertyDetail && (
-                        <dl className="dashboard__queue-filter-meta">
-                          <div>
-                            <dt>Parcel</dt>
-                            <dd>{selectedPropertyDetail.parcelId}</dd>
+                  {selectedPropertyDetail && (
+                    <dl className="dashboard__queue-filter-meta">
+                      <div>
+                        <dt>Parcel</dt>
+                        <dd>{selectedPropertyDetail.parcelId}</dd>
                           </div>
                           {selectedPropertyDetail.propertyType && (
                             <div>
@@ -1069,6 +1098,13 @@ export const Dashboard = () => {
                           )}
                         </dl>
                       )}
+                      <button
+                        type="button"
+                        onClick={handleSelectNextProperty}
+                        disabled={propertyMarkers.length === 0}
+                      >
+                        Next property
+                      </button>
                       <button type="button" onClick={handleClearPropertyFilter}>
                         Show all opportunities
                       </button>

@@ -10,6 +10,7 @@ type MarketMapProps = {
   market: MarketMarker;
   className?: string;
   onBack?: () => void;
+  onNextProperty?: () => void;
   renderOverlay?: boolean;
   propertyDetail?: PropertyDetail;
 };
@@ -69,7 +70,14 @@ const formatDate = (value?: string) => {
   return date.toLocaleDateString();
 };
 
-export const MarketMap = ({ market, className, onBack, renderOverlay = true, propertyDetail }: MarketMapProps) => {
+export const MarketMap = ({
+  market,
+  className,
+  onBack,
+  onNextProperty,
+  renderOverlay = true,
+  propertyDetail,
+}: MarketMapProps) => {
   const center: LatLngExpression = [market.location[0], market.location[1]];
   const intensity = Math.min(0.12 + (market.activeEntities / Math.max(market.entities, 1)) * 0.45, 0.65);
   const isParcel = Boolean(market.parcelId);
@@ -127,15 +135,28 @@ export const MarketMap = ({ market, className, onBack, renderOverlay = true, pro
                 </p>
               )}
             </div>
-            {onBack && (
-              <button
-                type="button"
-                onClick={onBack}
-                className="rounded-full border border-[rgba(249,207,100,0.65)] bg-transparent px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#f9cf64] transition-colors hover:bg-[rgba(249,207,100,0.08)]"
-              >
-                Back to globe
-              </button>
-            )}
+            {onNextProperty || onBack ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {onNextProperty && (
+                  <button
+                    type="button"
+                    onClick={onNextProperty}
+                    className="rounded-full border border-[#f9cf64] bg-[#f9cf64] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#071623] transition-colors hover:border-[#ffd77c] hover:bg-[#ffd77c]"
+                  >
+                    Next property
+                  </button>
+                )}
+                {onBack && (
+                  <button
+                    type="button"
+                    onClick={onBack}
+                    className="rounded-full border border-[rgba(249,207,100,0.65)] bg-transparent px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#f9cf64] transition-colors hover:bg-[rgba(249,207,100,0.08)]"
+                  >
+                    Back to globe
+                  </button>
+                )}
+              </div>
+            ) : null}
           </div>
           {isParcel && detail ? (
             <div className="mt-4 grid gap-3 text-sm leading-relaxed text-[rgba(255,247,238,0.86)]">

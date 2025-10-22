@@ -6,7 +6,7 @@ const NAV_ITEMS = [
   { label: 'Overview', to: '/' },
   { label: 'Capabilities', to: '/#capabilities' },
   { label: 'Signals', to: '/#signals' },
-  { label: 'Projects', to: '/#projects' },
+  { label: 'Projects', to: '/projects' },
 ];
 
 export const Navigation = () => {
