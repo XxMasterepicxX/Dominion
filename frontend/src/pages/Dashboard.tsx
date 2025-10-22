@@ -6,6 +6,7 @@ import { LoadingScreen } from '../components/LoadingScreen';
 import { MarketMap } from '../components/MarketMap';
 import { connectDashboardUpdates, fetchDashboardState } from '../services/dashboard';
 import type { DashboardState, MarketMarker, PropertyDetail } from '../types/dashboard';
+import { getEntityInsight } from '../utils/entityInsights';
 import './Dashboard.css';
 
 type PanelKey = 'report' | 'opportunities' | 'activity';
@@ -1111,10 +1112,12 @@ export const Dashboard = () => {
                     </div>
                   )}
                   <ul className="dashboard__queue">
-                    {filteredOpportunities.length === 0 ? (
-                      <li className="dashboard__queue-empty">No opportunities found for this property yet.</li>
-                    ) : (
-                      filteredOpportunities.map((row) => (
+                  {filteredOpportunities.length === 0 ? (
+                    <li className="dashboard__queue-empty">No opportunities found for this property yet.</li>
+                  ) : (
+                    filteredOpportunities.map((row) => {
+                      const entityInsight = getEntityInsight(row.entity ?? row.property);
+                      return (
                         <li key={row.id}>
                           <div className="dashboard__queue-entity">
                             <span className="dashboard__queue-name">{row.entity ?? row.property ?? row.market}</span>
@@ -1137,10 +1140,15 @@ export const Dashboard = () => {
                               <span className="dashboard__queue-chip">{row.signalType.replace(/_/g, ' ')}</span>
                             )}
                             <span>
-                              Discovered{' '}
-                              {row.discoveredAt ? formatRelativeTime(row.discoveredAt) : 'n/a'}
+                              Discovered {row.discoveredAt ? formatRelativeTime(row.discoveredAt) : 'n/a'}
                             </span>
                           </div>
+                          {entityInsight && (
+                            <div className="dashboard__queue-entity-insight">
+                              <span className="dashboard__queue-entity-badge">{entityInsight.badge}</span>
+                              <p>{entityInsight.description}</p>
+                            </div>
+                          )}
                           {row.supportingTools && row.supportingTools.length > 0 && (
                             <div className="dashboard__queue-tools">
                               {row.supportingTools.map((tool) => (
@@ -1156,10 +1164,11 @@ export const Dashboard = () => {
                             <span>{row.status.replace('_', ' ')}</span>
                           </div>
                         </li>
-                      ))
-                    )}
-                  </ul>
-                </div>
+                      );
+                    })
+                  )}
+                </ul>
+              </div>
               </>
             )}
 

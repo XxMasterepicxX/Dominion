@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { Fragment, useEffect } from 'react';
 import { CircleMarker, MapContainer, TileLayer, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 import type { LatLngExpression } from 'leaflet';
 import type { MarketMarker, PropertyDetail } from '../types/dashboard';
 import { cn } from '../lib/cn';
+import { getEntityInsight } from '../utils/entityInsights';
 
 type MarketMapProps = {
   market: MarketMarker;
@@ -70,6 +71,60 @@ const formatDate = (value?: string) => {
   return date.toLocaleDateString();
 };
 
+const readableLabel = (raw: string) =>
+  raw
+    .replace(/[_\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+
+const formatMetadataValue = (value: unknown): string | undefined => {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return undefined;
+    }
+    if (Math.abs(value) >= 1000) {
+      return value.toLocaleString();
+    }
+    return value.toString();
+  }
+  if (typeof value === 'boolean') {
+    return value ? 'Yes' : 'No';
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  return undefined;
+};
+
+const OMIT_METADATA_KEYS = new Set([
+  'parcel_id',
+  'parcelid',
+  'address',
+  'owner',
+  'owner_name',
+  'property_type',
+  'propertytype',
+  'zoning',
+  'lot_size',
+  'lot_size_sqft',
+  'lot_size_sq_ft',
+  'acreage',
+  'market_value',
+  'assessed_value',
+  'ai_summary',
+  'summary',
+  'highlights',
+  'last_sale_price',
+  'last_sale_date',
+  'confidence',
+]);
+
 export const MarketMap = ({
   market,
   className,
@@ -87,6 +142,31 @@ export const MarketMap = ({
   const formattedAssessed = formatCurrency(detail?.assessedValue);
   const formattedSalePrice = formatCurrency(detail?.lastSalePrice);
   const formattedSaleDate = formatDate(detail?.lastSaleDate);
+  const ownerInsight = detail?.owner ? getEntityInsight(detail.owner) : null;
+  const metadataEntries =
+    detail?.metadata && typeof detail.metadata === 'object'
+      ? Object.entries(detail.metadata)
+          .filter(
+            ([key, value]) =>
+              typeof key === 'string' &&
+              !OMIT_METADATA_KEYS.has(key.toLowerCase()) &&
+              (typeof value === 'string' ||
+                typeof value === 'number' ||
+                typeof value === 'boolean'),
+          )
+          .map(([key, value]) => {
+            const formatted = formatMetadataValue(value);
+            if (!formatted) {
+              return null;
+            }
+            return {
+              label: readableLabel(key),
+              value: formatted,
+            };
+          })
+          .filter((entry): entry is { label: string; value: string } => entry !== null)
+          .slice(0, 5)
+      : [];
 
   return (
     <div className={cn('market-map relative h-full w-full overflow-hidden', className)}>
@@ -191,6 +271,12 @@ export const MarketMap = ({
                       {detail.owner}
                       {detail.ownerType ? ` (${detail.ownerType.toUpperCase()})` : ''}
                     </dd>
+                    {ownerInsight && (
+                      <dd className="sm:ml-3 normal-case text-[rgba(255,247,238,0.7)]">
+                        <span className="market-map__insight-badge">{ownerInsight.badge}</span>
+                        <span className="market-map__insight-copy">{ownerInsight.description}</span>
+                      </dd>
+                    )}
                   </>
                 )}
                 {(formattedSalePrice || formattedSaleDate) && (
@@ -209,6 +295,16 @@ export const MarketMap = ({
                   </>
                 )}
               </dl>
+              {metadataEntries.length > 0 && (
+                <dl className="market-map__metadata">
+                  {metadataEntries.map((entry) => (
+                    <Fragment key={`${detail.parcelId}-${entry.label}`}>
+                      <dt>{entry.label}</dt>
+                      <dd>{entry.value}</dd>
+                    </Fragment>
+                  ))}
+                </dl>
+              )}
               {detail.aiSummary && (
                 <p className="normal-case text-[rgba(255,247,238,0.86)]">{detail.aiSummary}</p>
               )}

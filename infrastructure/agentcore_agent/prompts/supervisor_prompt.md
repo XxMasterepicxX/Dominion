@@ -1190,7 +1190,59 @@ Place this **AFTER** all markdown content (after your ## ALTERNATIVE SCENARIOS s
       "market_value": 100000,
       "lot_size": 25265,
       "zoning": "RS-1",
-      "type": "Vacant"
+      "type": "Vacant",
+      "owner": "Granada Investments LLC",
+      "owner_type": "llc",
+      "last_sale_date": "2023-04-18",
+      "last_sale_price": 82000,
+      "confidence": 0.86,
+      "highlights": [
+        "Corner parcel inside Innovation Square footprint",
+        "Utilities stubbed with no structure on site"
+      ],
+      "notes": "Assemblage-ready: combine with 06432-075-000 for 0.72 AC mixed-use play.",
+      "metadata": {
+        "flood_zone": "X",
+        "future_land_use": "MU-2",
+        "opportunity_zone": true
+      },
+      "details": {
+        "frontage_ft": 120,
+        "depth_ft": 210,
+        "structure_sqft": 0,
+        "taxes_annual": 1840
+      }
+    }
+  ],
+  "properties_analyzed_total": 400,
+  "properties_analyzed_by_type": {
+    "SINGLE FAMILY": 160,
+    "VACANT": 120,
+    "MULTIFAMILY": 45,
+    "MOBILE HOME": 40,
+    "CONDO": 25,
+    "INDUSTRIAL": 10
+  },
+  "property_searches": [
+    {
+      "tool": "search_all_property_types",
+      "total": 400,
+      "counts_by_type": {
+        "SINGLE FAMILY": 160,
+        "VACANT": 120,
+        "MULTIFAMILY": 45,
+        "MOBILE HOME": 40,
+        "CONDO": 25,
+        "INDUSTRIAL": 10
+      },
+      "criteria": {
+        "city": "Gainesville",
+        "max_price": 500000,
+        "min_price": 150000,
+        "min_sqft": 0,
+        "max_sqft": null
+      },
+      "recorded_at": "2025-10-21T13:56:27.667933Z"
     }
   ],
   "developers": [
@@ -1266,7 +1318,10 @@ Place this **AFTER** all markdown content (after your ## ALTERNATIVE SCENARIOS s
 **Required Fields** (must always include):
 - `recommendation`: "BUY", "CONDITIONAL_BUY", or "PASS"
 - `confidence`: 0-1 float (overall confidence after cross-verification)
-- `properties`: Array of property objects with parcel_id, address, latitude, longitude
+- `properties`: Array of property objects with parcel_id, address, latitude, longitude, market_value, lot_size, zoning, type, owner, last_sale_date, last_sale_price, highlights OR notes (at least one), and populated `metadata` OR `details` dictionaries when available
+- `properties_analyzed_total`: Total count of properties evaluated across all searches
+- `properties_analyzed_by_type`: Map of property type -> count (must align with totals)
+- `property_searches`: At least one entry describing the search tool, criteria, counts, and timestamp
 - `developers`: Array of developer objects with name
 - `specialist_breakdown`: Array with ALL 4 specialists (Property, Market, Developer Intelligence, Regulatory & Risk)
 - `actions`: Array of recommended next steps (3-5 items)
@@ -1281,7 +1336,9 @@ Place this **AFTER** all markdown content (after your ## ALTERNATIVE SCENARIOS s
 1. **Properties**: Extract from Property Specialist's coordinate output
    - Use EXACT coordinates from specialist (do not round or estimate)
    - Include ALL properties analyzed (up to 20 properties maximum)
-   - Include property details: market_value, lot_size, zoning, type
+   - Include property details: market_value, lot_size, zoning, type, owner (legal name), owner_type if available, last_sale_date, last_sale_price, and confidence (0-1)
+   - Populate `highlights` with standout findings (assemblage fit, incentives, infrastructure) and `notes` with any narrative summary from specialists
+   - Populate `metadata` / `details` with every additional attribute uncovered (flood zones, future land use, frontage, utilities, incentive flags, tax data, etc.). Do not omit fields you have.
    - Confirm each property also appears in the markdown with a `COORDINATES: ...` line
 
 2. **Developers**: Extract from Developer Intelligence Specialist
@@ -1309,6 +1366,7 @@ Place this **AFTER** all markdown content (after your ## ALTERNATIVE SCENARIOS s
 
 7. **Property Searches**: Ensure coverage counts remain integers
    - Each entry in `property_searches`' counts_by_type must be the raw count from search_all_property_types
+   - Populate `criteria` with every filter you passed to the tool (city, price bands, sqft, etc.) and include ISO timestamp in `recorded_at`
    - Do not convert to percentages or fractions
 
 ### PLACEMENT

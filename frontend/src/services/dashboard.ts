@@ -885,6 +885,38 @@ export function transformAgentResponseToDashboard(
       ? parseInt(developersMatch[1], 10)
       : 0;
 
+  const propertyTypeBreakdown =
+    (structured.properties_analyzed_by_type &&
+      typeof structured.properties_analyzed_by_type === 'object' &&
+      structured.properties_analyzed_by_type) ||
+    (structured.property_searches &&
+      structured.property_searches.length > 0 &&
+      structured.property_searches[0]?.counts_by_type);
+
+  let dominantPropertyType: string | undefined;
+  let dominantPropertyCount = 0;
+  if (propertyTypeBreakdown) {
+    Object.entries(propertyTypeBreakdown).forEach(([key, value]) => {
+      if (typeof value === 'number' && value > dominantPropertyCount) {
+        dominantPropertyType = key;
+        dominantPropertyCount = value;
+      }
+    });
+  }
+
+  const formatTypeLabel = (value: string) =>
+    value
+      .replace(/[_\-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+      .replace(/\b\w/g, (match) => match.toUpperCase());
+
+  const searchCriteria =
+    structured.property_searches && structured.property_searches.length > 0
+      ? structured.property_searches[0]?.criteria
+      : undefined;
+
   // Create summary from first paragraph or first 200 chars
   const firstParagraph = message.split(/\n\n+/)[0] || message.substring(0, 200);
 
@@ -955,6 +987,56 @@ export function transformAgentResponseToDashboard(
     focusTagType = 'warning';
   }
 
+  const focusStats = [
+    {
+      label: 'Confidence',
+      value: `${Math.round(confidence * 100)}%`,
+      highlight: confidence > 0.7,
+    },
+    {
+      label: 'Properties Analyzed',
+      value: totalPropertiesAnalyzed.toString(),
+    },
+    {
+      label: 'Developers Identified',
+      value: developersFound.toString(),
+    },
+  ];
+
+  if (typeof structured.expected_return === 'string' && structured.expected_return.trim().length > 0) {
+    focusStats.push({
+      label: 'Projected Return',
+      value: structured.expected_return,
+      highlight: true,
+    });
+  }
+
+  if (dominantPropertyType) {
+    focusStats.push({
+      label: 'Dominant Inventory',
+      value: `${formatTypeLabel(dominantPropertyType)} • ${dominantPropertyCount.toLocaleString()}`,
+    });
+  }
+
+  const maxPrice =
+    searchCriteria && typeof (searchCriteria as any)?.max_price === 'number'
+      ? (searchCriteria as any).max_price
+      : undefined;
+  const minPrice =
+    searchCriteria && typeof (searchCriteria as any)?.min_price === 'number'
+      ? (searchCriteria as any).min_price
+      : undefined;
+
+  if (typeof maxPrice === 'number' && !Number.isNaN(maxPrice)) {
+    focusStats.push({
+      label: minPrice && !Number.isNaN(minPrice) ? 'Price Band' : 'Price Ceiling',
+      value:
+        minPrice && !Number.isNaN(minPrice)
+          ? `$${Math.round(minPrice).toLocaleString()} - $${Math.round(maxPrice).toLocaleString()}`
+          : `$${Math.round(maxPrice).toLocaleString()}`,
+    });
+  }
+
   const pluralize = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
   return {
@@ -995,21 +1077,7 @@ export function transformAgentResponseToDashboard(
       tag: focusTag,
       tagType: focusTagType,
       summary: firstParagraph,
-      stats: [
-        {
-          label: 'Confidence',
-          value: `${Math.round(confidence * 100)}%`,
-          highlight: confidence > 0.7,
-        },
-        {
-          label: 'Properties Analyzed',
-          value: totalPropertiesAnalyzed.toString(),
-        },
-        {
-          label: 'Developers Identified',
-          value: developersFound.toString(),
-        },
-      ],
+      stats: focusStats,
     },
     markets,
     propertyDetails: Object.keys(propertyDetails).length > 0 ? propertyDetails : undefined,
@@ -1059,22 +1127,110 @@ function buildOpportunityQueue(
   const opportunities: any[] = [];
   const structuredProps = agentResponse.structured_data?.properties || [];
   const developers = agentResponse.structured_data?.developers || [];
+  const structuredData = agentResponse.structured_data;
+  const expectedReturn =
+    structuredData && typeof structuredData.expected_return === 'string' && structuredData.expected_return.trim().length > 0
+      ? structuredData.expected_return
+      : undefined;
+  const globalRisks =
+    structuredData?.risks && Array.isArray(structuredData.risks)
+      ? structuredData.risks
+          .map((risk) => {
+            if (!risk || typeof risk.risk !== 'string') {
+              return undefined;
+            }
+            const mitigation =
+              typeof risk.mitigation === 'string' && risk.mitigation.trim().length > 0
+                ? `Mitigation: ${risk.mitigation}`
+                : undefined;
+            return mitigation ? `${risk.risk} — ${mitigation}` : risk.risk;
+          })
+          .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+          .slice(0, 2)
+      : [];
+  const confidenceLabelFor = (value: number) => (value > 0.66 ? 'High' : value > 0.33 ? 'Medium' : 'Low');
 
   // Create property opportunities from structured data
   structuredProps.forEach((prop, index) => {
+    const highlight =
+      Array.isArray((prop as any)?.highlights) && (prop as any).highlights.length > 0
+        ? (prop as any).highlights.find((item: unknown) => typeof item === 'string' && item.trim().length > 0)
+        : undefined;
+    const propertyNotes =
+      typeof (prop as any)?.notes === 'string' && (prop as any).notes.trim().length > 0
+        ? (prop as any).notes.trim()
+        : undefined;
+    const ownerName =
+      typeof (prop as any)?.owner === 'string' && (prop as any).owner.trim().length > 0
+        ? (prop as any).owner.trim()
+        : undefined;
+    const propertyValue =
+      typeof (prop as any)?.market_value === 'number'
+        ? (prop as any).market_value
+        : typeof (prop as any)?.marketValue === 'number'
+          ? (prop as any).marketValue
+          : undefined;
+    const lotSize =
+      typeof (prop as any)?.lot_size === 'number'
+        ? (prop as any).lot_size
+        : typeof (prop as any)?.lot_size_sqft === 'number'
+          ? (prop as any).lot_size_sqft
+          : undefined;
+
+    const signalParts: string[] = [];
+    if (typeof highlight === 'string') {
+      signalParts.push(highlight);
+    }
+    if (typeof (prop as any)?.zoning === 'string' && (prop as any).zoning.trim().length > 0) {
+      signalParts.push(`Zoning ${((prop as any).zoning as string).toUpperCase()}`);
+    }
+    if (typeof lotSize === 'number' && Number.isFinite(lotSize) && lotSize > 0) {
+      signalParts.push(`${Math.round(lotSize).toLocaleString()} sqft lot`);
+    }
+    if (typeof propertyValue === 'number' && Number.isFinite(propertyValue) && propertyValue > 0) {
+      signalParts.push(`Est. value $${Math.round(propertyValue).toLocaleString()}`);
+    }
+
+    const propertyConfidence =
+      typeof (prop as any)?.confidence === 'number' && !Number.isNaN((prop as any).confidence)
+        ? (prop as any).confidence
+        : confidence;
+
+    const action = propertyNotes
+      ? propertyNotes.length > 140
+        ? `${propertyNotes.slice(0, 140)}…`
+        : propertyNotes
+      : ownerName
+        ? `Engage ${ownerName.split(',')[0]} to explore transaction terms`
+        : 'Review property file, comps, and site readiness';
+
+    const supportingTools = Array.from(
+      new Set(
+        [
+          'Property Specialist',
+          'Market Analysis',
+          typeof (prop as any)?.zoning === 'string' ? 'Regulatory & Risk' : null,
+          propertyNotes && propertyNotes.toLowerCase().includes('assemblage') ? 'Assemblage Intelligence' : null,
+        ].filter(Boolean) as string[],
+      ),
+    );
+
     opportunities.push({
       id: `opp-property-${Date.now()}-${index}`,
       type: 'property_deal' as const,
-      property: `${prop.address} (Parcel: ${prop.parcel_id})`,
+      property: `${(prop as any)?.address || (prop as any)?.parcel_id} (Parcel: ${(prop as any)?.parcel_id})`,
       market: setup.market,
       marketCode: setup.marketCode || setup.market.toLowerCase().replace(/\s+/g, '_'),
-      signal: `Property identified in ${setup.market}`,
-      signalType: 'ai_analysis',
-      confidence,
-      confidenceLabel: confidence > 0.66 ? 'High' : confidence > 0.33 ? 'Medium' : 'Low',
-      leadTime: 'Immediate',
-      action: 'Review property details and conduct site visit',
-      supportingTools: ['Property Specialist', 'Market Analysis'],
+      signal:
+        signalParts.length > 0 ? signalParts.join(' • ') : `Property identified in ${setup.market}`,
+      signalType: typeof highlight === 'string' ? 'ai_highlight' : 'ai_analysis',
+      confidence: propertyConfidence,
+      confidenceLabel: confidenceLabelFor(propertyConfidence),
+      leadTime: '0-30 days',
+      action,
+      estimatedReturn: expectedReturn,
+      risks: globalRisks.length > 0 ? globalRisks : undefined,
+      supportingTools,
       relatedProjectId: projectId,
       discoveredAt: now,
       status: 'new' as const,
@@ -1083,19 +1239,57 @@ function buildOpportunityQueue(
 
   // Create developer following opportunities
   developers.slice(0, 3).forEach((dev, index) => {
+    const significance =
+      typeof dev.significance === 'string' && dev.significance.trim().length > 0
+        ? dev.significance.trim()
+        : undefined;
+    const propertyCount =
+      typeof dev.property_count === 'number' && Number.isFinite(dev.property_count)
+        ? dev.property_count
+        : undefined;
+    const devSignalParts: string[] = [];
+    if (significance) {
+      devSignalParts.push(`${significance} developer`);
+    }
+    if (propertyCount) {
+      devSignalParts.push(`${propertyCount} holdings in market`);
+    }
+    const devConfidence = Math.min(
+      0.95,
+      Math.max(
+        0.1,
+        confidence * 0.9 + (significance && significance.toLowerCase() === 'high' ? 0.05 : 0),
+      ),
+    );
+    const developerAction = significance
+      ? `Align pipeline with ${dev.name} — ${significance.toLowerCase()} priority in ${setup.market}`
+      : 'Monitor developer acquisitions and pipeline';
+    const devSupportingTools = Array.from(
+      new Set(
+        [
+          'Developer Intelligence',
+          'Entity Analysis',
+          propertyCount && propertyCount > 75 ? 'Portfolio Tracker' : null,
+        ].filter(Boolean) as string[],
+      ),
+    );
+
     opportunities.push({
       id: `opp-developer-${Date.now()}-${index}`,
       type: 'entity_following' as const,
       entity: dev.name,
       market: setup.market,
       marketCode: setup.marketCode || setup.market.toLowerCase().replace(/\s+/g, '_'),
-      signal: `Active developer in ${setup.market}`,
-      signalType: 'pattern_analysis',
-      confidence: confidence * 0.9, // Slightly lower confidence for developer patterns
-      confidenceLabel: confidence > 0.66 ? 'High' : confidence > 0.33 ? 'Medium' : 'Low',
-      leadTime: '1-3 months',
-      action: 'Monitor developer acquisitions and pipeline',
-      supportingTools: ['Developer Intelligence', 'Entity Analysis'],
+      signal:
+        devSignalParts.length > 0 ? devSignalParts.join(' • ') : `Active developer in ${setup.market}`,
+      signalType: 'developer_intel',
+      confidence: devConfidence,
+      confidenceLabel: confidenceLabelFor(devConfidence),
+      leadTime: significance && significance.toLowerCase() === 'high' ? '30-60 days' : '1-3 months',
+      action: developerAction,
+      estimatedReturn: expectedReturn,
+      risks: globalRisks.length > 0 ? [globalRisks[0]] : undefined,
+      supportingTools: devSupportingTools,
       relatedProjectId: projectId,
       discoveredAt: now,
       status: 'new' as const,
