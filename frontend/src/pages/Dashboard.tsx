@@ -799,7 +799,7 @@ export const Dashboard = () => {
             <MarketMap
               market={selectedMarket}
               className="dashboard__map"
-              renderOverlay
+              renderOverlay={false}
               propertyDetail={selectedPropertyDetail}
               onNextProperty={propertyMarkers.length > 0 ? handleSelectNextProperty : undefined}
               onBack={() => {
