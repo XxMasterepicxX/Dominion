@@ -20,9 +20,9 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: clamp(240px, 20vw, 310px) minmax(400px, 1fr) clamp(300px, 28vw, 420px);
+  grid-template-columns: clamp(260px, 24vw, 380px) minmax(400px, 1fr) clamp(260px, 24vw, 380px);
   gap: clamp(20px, 3vw, 32px);
-  align-items: start;
+  align-items: stretch;
   flex: 1;
   min-height: 0;
   overflow: hidden;
