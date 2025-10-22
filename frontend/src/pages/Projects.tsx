@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchProjects } from '../services/dashboard';
 import type { ProjectSummary, ProjectType, ProjectStatus } from '../types/dashboard';
-import { getStoredProjectSummaries } from '../utils/projectStorage';
+import { getStoredProjectSummaries, removeStoredProjectSummary, deleteDraftSetup } from '../utils/projectStorage';
 import './Projects.css';
 
 const TYPE_LABELS: Record<ProjectType, string> = {
@@ -34,11 +34,39 @@ const formatConfidence = (value?: number) => {
 
 const formatProgress = (progress: number) => Math.min(100, Math.max(0, Math.round(progress)));
 
+const cleanMarkdown = (text: string) => {
+  if (!text) return '';
+  
+  return text
+    // Remove bold markdown (**text** or __text__)
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    // Remove italic markdown (*text* or _text_)
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    // Remove headers (# ## ### etc.)
+    .replace(/^#{1,6}\s+/gm, '')
+    // Remove inline code (`code`)
+    .replace(/`(.*?)`/g, '$1')
+    // Remove strikethrough (~~text~~)
+    .replace(/~~(.*?)~~/g, '$1')
+    // Clean up any remaining markdown artifacts
+    .replace(/[*#`~_]/g, '')
+    // Clean up extra whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+// Test the function with your example
+// Input: "The Gainesville market presents a **buyer's opportunity** with stable trends and 8.1% absorption. However, a critical price discrepancy exists between Property Specialist ($199K) and Market Special..."
+// Output: "The Gainesville market presents a buyer's opportunity with stable trends and 8.1% absorption. However, a critical price discrepancy exists between Property Specialist ($199K) and Market Special..."
+
 export const Projects = () => {
   
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingProject, setDeletingProject] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -60,7 +88,13 @@ export const Projects = () => {
             }
           }
         });
-        setProjects(Array.from(combinedMap.values()));
+        // Sort projects by lastUpdated (most recent first)
+        const sortedProjects = Array.from(combinedMap.values()).sort((a, b) => {
+          const dateA = new Date(a.lastUpdated).getTime();
+          const dateB = new Date(b.lastUpdated).getTime();
+          return dateB - dateA; // Descending order (newest first)
+        });
+        setProjects(sortedProjects);
         setError(null);
       })
       .catch((err) => {
@@ -75,9 +109,36 @@ export const Projects = () => {
     return () => controller.abort();
   }, []);
 
-  
+  const handleDeleteProject = async (projectId: string, projectName: string) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${projectName}"? This action cannot be undone.`
+    );
+    
+    if (!confirmed) return;
+
+    setDeletingProject(projectId);
+    
+    try {
+      // Remove from local storage
+      removeStoredProjectSummary(projectId);
+      deleteDraftSetup(projectId);
+      
+      // Remove from session storage (dashboard data)
+      sessionStorage.removeItem(`dominion/dashboard/${projectId}`);
+      
+      // Update local state
+      setProjects(prev => prev.filter(p => p.id !== projectId));
+      
+    } catch (err) {
+      console.error('Failed to delete project:', err);
+      setError('Failed to delete project. Please try again.');
+    } finally {
+      setDeletingProject(null);
+    }
+  };
 
   const groupedProjects = useMemo(() => {
+    // Projects are already sorted by lastUpdated, so we maintain that order within each group
     const live = projects.filter((project) => project.status === 'live');
     const complete = projects.filter((project) => project.status === 'complete');
     const generating = projects.filter((project) => project.status === 'generating');
@@ -97,7 +158,7 @@ export const Projects = () => {
         </div>
         <p className="projects__lead">
           Each project bundles the full Dominion analysis, live update stream, and action queue for the market focus you
-          define.
+          define. Projects are sorted by most recently updated.
         </p>
       </header>
 
@@ -152,7 +213,7 @@ export const Projects = () => {
                         </header>
                         <div className="projects__card-body">
                           <h3>{project.name}</h3>
-                          <p>{project.description}</p>
+                          <p>{cleanMarkdown(project.description)}</p>
                         </div>
                         <dl className="projects__meta">
                           <div>
@@ -189,6 +250,15 @@ export const Projects = () => {
                               Open project -&gt;
                             </Link>
                           )}
+                          <button
+                            type="button"
+                            className="projects__delete"
+                            onClick={() => handleDeleteProject(project.id, project.name)}
+                            disabled={deletingProject === project.id}
+                            title="Delete project"
+                          >
+                            {deletingProject === project.id ? '...' : '×'}
+                          </button>
                         </footer>
                       </article>
                     );

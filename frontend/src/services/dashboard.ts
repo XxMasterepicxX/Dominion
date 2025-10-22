@@ -5,7 +5,6 @@ import { parseAgentMarkdown } from '../utils/markdownParser';
 import { upsertStoredProjectSummary } from '../utils/projectStorage';
 // ProjectSummary already imported in types above when needed
 
-const DEFAULT_PROJECT_ID = 'proj-123';
 // Vite exposes env vars on import.meta.env in the browser; fall back to process.env for node environments
 const getEnv = (key: string) => (typeof (import.meta as any) !== 'undefined' ? (import.meta as any).env?.[key] : (process as any)?.env?.[key]);
 const API_BASE_URL = (getEnv('REACT_APP_API_BASE_URL') as string | undefined)?.replace(/\/$/, '') ?? '';
@@ -24,10 +23,13 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 export async function fetchDashboardState(
   options: FetchDashboardStateOptions = {},
 ): Promise<DashboardState> {
-  const { projectId = DEFAULT_PROJECT_ID, signal } = options;
+  const { projectId, signal } = options;
+  
+  if (!projectId) {
+    throw new Error('Project ID is required');
+  }
   if (!API_ENABLED) {
-    console.warn('[dashboard] API disabled, using mock dashboard state');
-    return clone(mockDashboardState);
+    throw new Error('API is disabled and no mock data available');
   }
   const endpoint = `${API_BASE_URL}/api/projects/${projectId}/report`.replace('//api', '/api');
 
@@ -60,7 +62,7 @@ export type DashboardUpdateMessage =
     };
 
 type ConnectLiveUpdatesOptions = {
-  projectId?: string;
+  projectId: string;
   onUpdate: (message: DashboardUpdateMessage) => void;
 };
 
@@ -161,7 +163,10 @@ export async function importReportFromJson(report: any, filename?: string): Prom
   return summary;
 }
 
-export function connectDashboardUpdates({ projectId = DEFAULT_PROJECT_ID, onUpdate }: ConnectLiveUpdatesOptions) {
+export function connectDashboardUpdates({ projectId, onUpdate }: ConnectLiveUpdatesOptions) {
+  if (!projectId) {
+    return () => {};
+  }
   if (!WS_BASE_URL) {
     return () => {};
   }

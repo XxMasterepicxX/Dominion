@@ -583,7 +583,7 @@ export const ProjectCreate = () => {
                 type="text"
                 value={form.name}
                 onChange={(event) => handleInput('name', event.target.value)}
-                placeholder="D.R. Horton Gainesville strategy"
+                placeholder="Enter project name"
               />
             </label>
           </div>

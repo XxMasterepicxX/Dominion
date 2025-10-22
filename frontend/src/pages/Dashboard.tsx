@@ -6,7 +6,6 @@ import { LoadingScreen } from '../components/LoadingScreen';
 import { MarketMap } from '../components/MarketMap';
 import { connectDashboardUpdates, fetchDashboardState } from '../services/dashboard';
 import type { DashboardState, MarketMarker, PropertyDetail } from '../types/dashboard';
-import { mockDashboardState } from '../stubs/mockDashboardState';
 import './Dashboard.css';
 
 type PanelKey = 'report' | 'opportunities' | 'activity';
@@ -118,6 +117,33 @@ const stripBulletPrefix = (line: string) => {
     return trimmed.replace(/^[\u2022\u25CF\u25AA]\s*/, '');
   }
   return trimmed;
+};
+
+const normalizeMarkdownTextForComparison = (value?: string): string => {
+  if (!value) {
+    return '';
+  }
+  return value
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => stripBulletPrefix(line).trim())
+    .filter((line) => line.length > 0)
+    .join(' ')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+};
+
+const formatMetricValue = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return '--';
+  }
+  if (typeof value !== 'string') {
+    return String(value);
+  }
+  const cleaned = value.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  return cleaned.length > 0 ? cleaned : '--';
 };
 
 const TABLE_SEPARATOR_CELL_REGEX = /^:?-{3,}:?$/;
@@ -424,23 +450,7 @@ export const Dashboard = () => {
     setGlobeReady(false);
     setError(null);
 
-    if (requestedProjectId === 'proj-123') {
-      const cachedMock = loadCachedDashboardState(requestedProjectId);
-      if (cachedMock) {
-        setState(cachedMock);
-        setLoading(false);
-        setIntroProgress((prev) => (prev < 92 ? 92 : prev));
-        console.log('[Dashboard] Using cached mock data for proj-123');
-        return;
-      }
-      setState(mockDashboardState);
-      setLoading(false);
-      setIntroProgress((prev) => (prev < 92 ? 92 : prev));
-      console.log('[Dashboard] Loaded mock project proj-123 without cached data');
-      return () => {
-        controller.abort();
-      };
-    }
+
 
     const cachedState = loadCachedDashboardState(requestedProjectId);
     if (cachedState) {
@@ -467,7 +477,7 @@ export const Dashboard = () => {
   }, [navigate, requestedProjectId]);
 
   useEffect(() => {
-    if (!projectId) {
+    if (!projectId || !state?.isLive) {
       return;
     }
     const disconnect = connectDashboardUpdates({
@@ -496,7 +506,7 @@ export const Dashboard = () => {
     return () => {
       disconnect?.();
     };
-  }, [projectId]);
+  }, [projectId, state?.isLive]);
 
   useEffect(() => {
     if (!state?.project.id) {
@@ -542,7 +552,7 @@ export const Dashboard = () => {
 
   const introProjectLine = useMemo(() => {
     if (state) {
-      return `${state.project.name} Â� ${state.project.market}`;
+      return `${state.project.name} • ${state.project.market}`;
     }
     if (requestedProjectId) {
       return `Project ${requestedProjectId}`;
@@ -553,7 +563,7 @@ export const Dashboard = () => {
   const { status: introStatus, detail: introDetail, caption: introCaption } = useMemo(() => {
     const withProject = (base?: string) => {
       if (introProjectLine) {
-        return base ? `${base} Â� ${introProjectLine}` : introProjectLine;
+        return base ? `${base} • ${introProjectLine}` : introProjectLine;
       }
       return base;
     };
@@ -642,6 +652,17 @@ export const Dashboard = () => {
     setSelectedPropertyId(null);
     setSelectedMarket(null);
   }, []);
+  const handleToggleLive = useCallback(() => {
+    setState((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return {
+        ...prev,
+        isLive: !prev.isLive,
+      };
+    });
+  }, []);
   const handleExportJson = useCallback(() => {
     if (!state) {
       return;
@@ -662,6 +683,24 @@ export const Dashboard = () => {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   }, [state]);
+
+  const showReportSummary = useMemo(() => {
+    const report = state?.reportContent;
+    if (!report?.summary) {
+      return false;
+    }
+    const summaryNormalized = normalizeMarkdownTextForComparison(report.summary);
+    if (!summaryNormalized) {
+      return false;
+    }
+    const firstSectionContent =
+      report.sections && report.sections.length > 0 ? report.sections[0]?.content : undefined;
+    if (!firstSectionContent) {
+      return true;
+    }
+    const firstSectionNormalized = normalizeMarkdownTextForComparison(firstSectionContent);
+    return summaryNormalized !== firstSectionNormalized;
+  }, [state?.reportContent]);
 
   if (!state) {
     if (loading) {
@@ -757,7 +796,6 @@ export const Dashboard = () => {
           <div className="dashboard__sidebar-section">
             <div className="dashboard__sidebar-heading">
               <span>Project Report</span>
-              <span className="dashboard__sidebar-tag">{state.project.market}</span>
             </div>
             <div className="dashboard__sidebar-meta">
               <span>{state.project.name}</span>
@@ -766,32 +804,52 @@ export const Dashboard = () => {
               <span>Confidence {formatConfidence(state.project.confidence)}</span>
               <span>Opportunities {state.project.opportunities}</span>
             </div>
-            <div className={`dashboard__live ${state.isLive ? 'dashboard__live--active' : ''}`}>
+            <button
+              type="button"
+              className={`dashboard__live ${state.isLive ? 'dashboard__live--active' : ''}`}
+              onClick={handleToggleLive}
+              aria-pressed={state.isLive}
+            >
               <span className="dashboard__live-dot" />
               <span>{state.isLive ? 'Live updates enabled' : 'Live updates paused'}</span>
-            </div>
+            </button>
             <button type="button" className="dashboard__sidebar-primary" onClick={handleExportJson}>
               Export JSON
             </button>
           </div>
           <div className="dashboard__sidebar-list">
-            <span className="dashboard__sidebar-label">Latest Updates</span>
+            <div className="dashboard__sidebar-label-group">
+              <span className="dashboard__sidebar-label">Latest Updates</span>
+              <span className="dashboard__sidebar-label-note">
+                {state.isLive
+                  ? 'Live monitor on - new activity will appear here.'
+                  : 'Live monitor paused - turn live updates back on to see new activity.'}
+              </span>
+            </div>
             <ul>
-              {state.latestUpdates.map((item) => (
-                <li
-                  key={item.id}
-                  className={`dashboard__sidebar-item ${item.status === 'new' ? 'dashboard__sidebar-item--new' : ''}`}
-                >
-                  <div>
-                    <span className="dashboard__sidebar-item-title">{item.title}</span>
-                    <span className="dashboard__sidebar-item-detail">{item.detail}</span>
-                  </div>
-                  <div className="dashboard__sidebar-item-meta">
-                    <span>{formatRelativeTime(item.timestamp)}</span>
-                    <span className="dashboard__sidebar-status">{item.updateType.replace('_', ' ')}</span>
-                  </div>
+              {state.latestUpdates.length === 0 ? (
+                <li className="dashboard__sidebar-empty">
+                  {state.isLive
+                    ? 'Live monitor on - new activity will appear here.'
+                    : 'Live monitor paused - turn live updates back on to see new activity.'}
                 </li>
-              ))}
+              ) : (
+                state.latestUpdates.map((item) => (
+                  <li
+                    key={item.id}
+                    className={`dashboard__sidebar-item ${item.status === 'new' ? 'dashboard__sidebar-item--new' : ''}`}
+                  >
+                    <div>
+                      <span className="dashboard__sidebar-item-title">{item.title}</span>
+                      <span className="dashboard__sidebar-item-detail">{item.detail}</span>
+                    </div>
+                    <div className="dashboard__sidebar-item-meta">
+                      <span>{formatRelativeTime(item.timestamp)}</span>
+                      <span className="dashboard__sidebar-status">{item.updateType.replace('_', ' ')}</span>
+                    </div>
+                  </li>
+                ))
+              )}
             </ul>
           </div>
         </aside>
@@ -850,9 +908,8 @@ export const Dashboard = () => {
             </button>
             <button
               type="button"
-              className={`dashboard__widgets-tab dashboard__widgets-tab--opportunities ${
-                activePanel === 'opportunities' ? 'dashboard__widgets-tab--active' : ''
-              }`}
+              className={`dashboard__widgets-tab dashboard__widgets-tab--opportunities ${activePanel === 'opportunities' ? 'dashboard__widgets-tab--active' : ''
+                }`}
               onClick={() => setActivePanel('opportunities')}
             >
               Opportunities
@@ -890,10 +947,11 @@ export const Dashboard = () => {
                       <strong>{state.reportContent.analysisType}</strong>
                     </div>
                   </div>
-                  {renderSimpleMarkdown(state.reportContent.summary, 'report-summary', {
-                    paragraphClass: 'dashboard__report-summary',
-                    listClass: 'dashboard__report-list',
-                  })}
+                  {showReportSummary &&
+                    renderSimpleMarkdown(state.reportContent.summary, 'report-summary', {
+                      paragraphClass: 'dashboard__report-summary',
+                      listClass: 'dashboard__report-list',
+                    })}
                   {state.reportContent.marketContext &&
                     renderSimpleMarkdown(state.reportContent.marketContext, 'report-market', {
                       paragraphClass: 'dashboard__report-market',
@@ -926,17 +984,17 @@ export const Dashboard = () => {
                         )}
                         {section.metrics && section.metrics.length > 0 && (
                           <ul className="dashboard__report-metrics">
-                            {section.metrics.map((metric) => (
-                              <li
-                                key={`${section.title}-${metric.label}`}
-                                className={metric.highlight ? 'dashboard__report-metric--highlight' : ''}
-                              >
-                                <span>{sanitizeInlineLabel((metric.label ?? '').toString())}</span>
-                                <strong>{metric.value}</strong>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
+                        {section.metrics.map((metric) => (
+                          <li
+                            key={`${section.title}-${metric.label}`}
+                            className={metric.highlight ? 'dashboard__report-metric--highlight' : ''}
+                          >
+                            <span>{sanitizeInlineLabel((metric.label ?? '').toString())}</span>
+                            <strong>{formatMetricValue(metric.value)}</strong>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                       </section>
                     ))}
                   </div>

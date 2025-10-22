@@ -4,6 +4,8 @@
   gap: clamp(32px, 4vw, 48px);
   background: linear-gradient(180deg, rgba(5, 14, 24, 0.04), rgba(255, 247, 238, 0.94));
   min-height: calc(100vh - 160px);
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 
@@ -27,6 +29,7 @@
   justify-content: space-between;
   gap: clamp(16px, 4vw, 32px);
   flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .projects__header h1 {
@@ -34,6 +37,8 @@
   font-size: clamp(2rem, 3.4vw, 2.8rem);
   line-height: 1.1;
   color: var(--color-ink);
+  max-width: 100%;
+  word-wrap: break-word;
 }
 
 .projects__lead {
@@ -41,7 +46,7 @@
   color: rgba(5, 14, 24, 0.7);
   font-size: 1rem;
   line-height: 1.7;
-  white-space: nowrap;
+  max-width: 100%;
 }
 
 
@@ -125,6 +130,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: clamp(20px, 3vw, 28px);
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .projects__card {
@@ -144,6 +151,12 @@
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
+}
+
+.projects__card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .projects__header-actions {
@@ -284,7 +297,9 @@
 
 .projects__card-footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }
 
 .projects__open {
@@ -311,11 +326,36 @@
     border-color: var(--color-accent);
   }
 
-@media (max-width: 960px) {
-  .projects__lead {
-    white-space: normal;
-  }
+.projects__delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(204, 68, 68, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: rgba(204, 68, 68, 0.8);
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1;
+  flex-shrink: 0;
 }
+
+.projects__delete:hover:not(:disabled) {
+  border-color: rgba(204, 68, 68, 0.6);
+  background: rgba(204, 68, 68, 0.1);
+  transform: scale(1.1);
+}
+
+.projects__delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+
 
 @keyframes projects-spin {
   0% {
