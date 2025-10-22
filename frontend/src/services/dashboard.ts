@@ -370,7 +370,9 @@ export async function analyzeWithAgent(
   onProgress?: (status: string) => void
 ): Promise<AgentResponse> {
   try {
-    console.log('[Agent] Invoking multi-agent system:', { prompt, projectId });
+    if (import.meta.env.DEV) {
+      console.log('[Agent] Invoking multi-agent system:', { projectId });
+    }
 
     if (onProgress) onProgress('Connecting to agent...');
 
@@ -407,14 +409,16 @@ export async function analyzeWithAgent(
 
       const agentResponse = (await response.json()) as AgentResponse;
 
-      console.log('[Agent] Analysis complete:', {
-        success: agentResponse.success,
-        session_id: agentResponse.session_id,
-        message_length: agentResponse.message?.length || 0,
-        has_structured_data: !!agentResponse.structured_data,
-        properties_analyzed_total: agentResponse.structured_data?.properties_analyzed_total ?? null,
-        properties_count: agentResponse.structured_data?.properties?.length || 0,
-      });
+      if (import.meta.env.DEV) {
+        console.log('[Agent] Analysis complete:', {
+          success: agentResponse.success,
+          session_id: agentResponse.session_id,
+          message_length: agentResponse.message?.length || 0,
+          has_structured_data: !!agentResponse.structured_data,
+          properties_analyzed_total: agentResponse.structured_data?.properties_analyzed_total ?? null,
+          properties_count: agentResponse.structured_data?.properties?.length || 0,
+        });
+      }
 
       if (onProgress) onProgress('Analysis complete!');
 

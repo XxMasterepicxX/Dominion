@@ -457,7 +457,9 @@ export const ProjectCreate = () => {
         prompt += ` NOTES: ${form.strategy}`;
       }
 
-      console.log('[ProjectCreate] Invoking agent:', { projectId, prompt });
+      if (import.meta.env.DEV) {
+        console.log('[ProjectCreate] Invoking agent:', { projectId });
+      }
 
       // Simulate progress updates while agent processes (takes 10-20 min)
       const progressInterval = setInterval(() => {

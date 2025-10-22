@@ -375,7 +375,9 @@ const loadCachedDashboardState = (projectId: string): DashboardState | null => {
     if (sessionRaw) {
       const parsed = JSON.parse(sessionRaw) as CachedDashboardEnvelope;
       if (parsed && parsed.version === DASHBOARD_CACHE_VERSION && parsed.state) {
+      if (import.meta.env.DEV) {
         console.log('[Dashboard] Loaded from sessionStorage:', projectId);
+      }
         return parsed.state;
       }
     }
@@ -460,7 +462,9 @@ export const Dashboard = () => {
       setState(cachedState);
       setLoading(false);
       setIntroProgress((prev) => (prev < 92 ? 92 : prev));
-      console.log('[Dashboard] Using cached data, skipping API refresh');
+      if (import.meta.env.DEV) {
+        console.log('[Dashboard] Using cached data, skipping API refresh');
+      }
       return; // Don't try to fetch from API
     }
 
